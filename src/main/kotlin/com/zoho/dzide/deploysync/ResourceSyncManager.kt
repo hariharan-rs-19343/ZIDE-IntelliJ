@@ -3,6 +3,7 @@ package com.zoho.dzide.deploysync
 import com.intellij.execution.ui.ConsoleView
 import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -186,19 +187,31 @@ class ResourceSyncManager(private val project: Project) : Disposable {
 
         classRelativePath = classRelativePath.replace(".java", ".class")
 
+        // IntelliJ places compiled output under various directories depending on build system:
+        //   - out/production/{moduleName}/   (IntelliJ default output)
+        //   - bin/production/{moduleName}/    (IntelliJ with custom output)
+        //   - target/classes/                 (Maven)
+        //   - build/classes/java/main/        (Gradle)
+        //   - build/classes/                  (Gradle legacy)
+        //   - bin/                            (Eclipse)
+        val moduleName = Path.of(projectRoot).fileName.toString()
         val candidates = listOf(
+            Path.of(projectRoot, "out", "production", moduleName, classRelativePath),
+            Path.of(projectRoot, "bin", "production", moduleName, classRelativePath),
             Path.of(projectRoot, "target", "classes", classRelativePath),
-            Path.of(projectRoot, "bin", classRelativePath),
-            Path.of(projectRoot, "build", "classes", classRelativePath)
+            Path.of(projectRoot, "build", "classes", "java", "main", classRelativePath),
+            Path.of(projectRoot, "build", "classes", classRelativePath),
+            Path.of(projectRoot, "bin", classRelativePath)
         )
         val sourceClassPath = candidates.firstOrNull { it.exists() }?.toString()
         if (sourceClassPath == null) {
-            log("Compiled class not found for $filePath. Skipping Java class sync.")
+            log("Compiled class not found for $filePath. Searched: out/production/$moduleName/, bin/production/$moduleName/, target/classes/, build/classes/, bin/")
             return
         }
 
         copyClassFileToDeployment(sourceClassPath, classRelativePath, server, projectName)
     }
+
 
     private fun resolveClassRelativePathFromFallback(normalizedRelative: String): String? {
         if ("src/main/java/" in normalizedRelative) {
@@ -208,6 +221,23 @@ class ResourceSyncManager(private val project: Project) : Disposable {
             return normalizedRelative.substringAfter("src/")
         }
         return null
+    }
+
+    private fun triggerHotSwap() {
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            val debuggerManager = com.intellij.debugger.DebuggerManagerEx.getInstanceEx(project)
+            val sessions = debuggerManager.sessions
+            if (sessions.isEmpty()) {
+                log("No active debug session — hot-swap skipped. Changes will take effect after restart.")
+                return@invokeLater
+            }
+            for (session in sessions) {
+                val hotSwapManager = com.intellij.debugger.ui.HotSwapUI.getInstance(project)
+                hotSwapManager.reloadChangedClasses(session, false)
+                log("Hot-swap triggered for debug session: ${session.sessionName}")
+            }
+        }
     }
 
     fun handleDocumentSave(filePath: String) {
@@ -220,7 +250,20 @@ class ResourceSyncManager(private val project: Project) : Disposable {
         val m19ProjectName = refreshedServer.repositoryModuleDir ?: projectDirectoryName
 
         if (filePath.endsWith(".java")) {
-            copyCompiledJavaClass(projectRoot, refreshedServer, filePath, projectDirectoryName)
+            // Compile the changed file, then copy the .class to deployment
+            // and trigger JDWP hot-swap if a debug session is active.
+            ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed) return@invokeLater
+                val compilerManager = com.intellij.openapi.compiler.CompilerManager.getInstance(project)
+                compilerManager.make(project, com.intellij.openapi.module.ModuleManager.getInstance(project).modules) { aborted, errors, _, _ ->
+                    if (!aborted && errors == 0) {
+                        copyCompiledJavaClass(projectRoot, refreshedServer, filePath, projectDirectoryName)
+                        triggerHotSwap()
+                    } else if (errors > 0) {
+                        log("Compilation has errors. Skipping class sync for $filePath.")
+                    }
+                }
+            }
             return
         }
 
