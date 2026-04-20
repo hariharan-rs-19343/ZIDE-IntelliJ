@@ -3,17 +3,39 @@
     <name>ZIDE</name>
     <vendor>Zoho</vendor>
     <description><![CDATA[
-        ZIDE — Tomcat server management and ZIDE auto-configuration for IntelliJ IDEA.
+        <p>ZIDE brings Zoho's server development workflow to IntelliJ IDEA — manage Tomcat servers, deploy, debug, and iterate on code without leaving the IDE.</p>
+        <h3>Server Management</h3>
         <ul>
-            <li>Add / Edit / Remove Tomcat servers from a dedicated tool window</li>
-            <li>Start / Stop servers with real-time log output</li>
-            <li>Run and Debug Java projects on Tomcat with JPDA support</li>
+            <li>Add, edit, and remove Tomcat server configurations from a dedicated tool window</li>
+            <li>Start, stop, and restart servers with real-time log streaming</li>
+            <li>Run and debug Java projects on Tomcat with JPDA auto-attach</li>
+        </ul>
+        <h3>Deploy Sync</h3>
+        <ul>
+            <li>Auto-compile and hot-swap Java classes on save (debug mode)</li>
+            <li>ANT hook tasks and auto-resource copy for JSP, JS, CSS, and XML changes</li>
+            <li>Compiled class files synced to deployment WEB-INF/classes/</li>
+        </ul>
+        <h3>ZIDE Integration</h3>
+        <ul>
             <li>Auto-configure from Eclipse ZIDE projects (.zide_resources/)</li>
-            <li>Deploy-sync on save: ANT hooks and compiled class file copy</li>
+            <li>Deployment config patching — server.xml, web.xml, persistence, and security configs</li>
+            <li>Update Deployment — deploy zip archives to the ZIDE deployment folder</li>
+        </ul>
+        <h3>Productivity</h3>
+        <ul>
+            <li>ZIDE menu with keyboard shortcuts for Run, Debug, Stop, and Build</li>
+            <li>App Logs viewer with color-coded ERROR/WARN highlighting</li>
         </ul>
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.0.4</b>
+        <ul>
+            <li>Hot-swap on save — Java class changes are hot-swapped into the running JVM via JDWP when a debug session is active</li>
+            <li>Deploy-sync copies compiled .class files to deployment WEB-INF/classes/ after every successful build</li>
+            <li>Broader compiler output detection — searches out/production/, bin/production/, target/classes/, build/classes/, and bin/ for compiled classes</li>
+        </ul>
         <b>0.0.3</b>
         <ul>
             <li>Keyboard shortcuts — Run (Ctrl+Shift+I), Debug (Ctrl+Shift+D), Stop (Ctrl+Shift+.), Build (Ctrl+Shift+B)</li>
