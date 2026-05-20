@@ -7,6 +7,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.zoho.dzide.deploysync.AntResolver
 import com.zoho.dzide.tomcat.TomcatManager
+import com.zoho.dzide.util.ConsoleUtil
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.ProcessUtil
 import java.nio.file.Path
@@ -59,40 +60,27 @@ class BuildAction : AnAction("Build", "Run ANT build script", null) {
                         command = listOf(antExe),
                         workingDir = buildDir.toString(),
                         env = mapOf("ANT_HOME" to antHome),
-                        onStdout = { line ->
-                            printToConsole(console, project, line + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
+                        onStdout = { text ->
+                            ConsoleUtil.print(console, project, text, ConsoleViewContentType.NORMAL_OUTPUT)
                         },
-                        onStderr = { line ->
-                            printToConsole(console, project, line + "\n", ConsoleViewContentType.ERROR_OUTPUT)
+                        onStderr = { text ->
+                            ConsoleUtil.print(console, project, text, ConsoleViewContentType.ERROR_OUTPUT)
                         },
                         onExit = { exitCode ->
                             if (exitCode != 0) {
-                                printToConsole(console, project, "\nBuild FAILED (exit code $exitCode)\n", ConsoleViewContentType.ERROR_OUTPUT)
+                                ConsoleUtil.print(console, project, "\nBuild FAILED (exit code $exitCode)\n", ConsoleViewContentType.ERROR_OUTPUT)
                                 NotificationUtil.error(project, "ANT build failed with exit code $exitCode")
                             } else {
-                                printToConsole(console, project, "\n=== Build complete ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                ConsoleUtil.print(console, project, "\n=== Build complete ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                                 NotificationUtil.info(project, "Build completed: $productName")
                             }
                         }
                     )
                     handler.waitFor()
                 } catch (ex: Exception) {
-                    printToConsole(console, project, "Error: ${ex.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "Error: ${ex.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
                     NotificationUtil.error(project, "Build failed: ${ex.message}")
                 }
-            }
-        }
-    }
-
-    private fun printToConsole(
-        console: com.intellij.execution.ui.ConsoleView,
-        project: com.intellij.openapi.project.Project,
-        text: String,
-        type: ConsoleViewContentType
-    ) {
-        ApplicationManager.getApplication().invokeLater {
-            if (!project.isDisposed) {
-                console.print(text, type)
             }
         }
     }

@@ -3,6 +3,7 @@ package com.zoho.dzide.tomcat
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.ui.ConsoleView
 import com.intellij.execution.ui.ConsoleViewContentType
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
@@ -16,14 +17,15 @@ import com.zoho.dzide.zide.ZideConfigParser
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.exists
 
 @Service(Service.Level.PROJECT)
-class TomcatManager(private val project: Project) {
+class TomcatManager(private val project: Project) : Disposable {
 
     var consoleView: ConsoleView? = null
     var appLogsConsoleView: ConsoleView? = null
-    private val serverProcesses = mutableMapOf<String, OSProcessHandler>()
+    private val serverProcesses = ConcurrentHashMap<String, OSProcessHandler>()
     private val serverProvider: TomcatServerProvider
         get() = TomcatServerProvider.getInstance(project)
 
@@ -92,7 +94,7 @@ class TomcatManager(private val project: Project) {
     private fun buildCatalinaEnvVars(server: TomcatServer, debugPort: Int? = null): Map<String, String> {
         val env = mutableMapOf("CATALINA_PID" to "pid.file")
         if (debugPort != null) {
-            env["JPDA_ADDRESS"] = debugPort.toString()
+            env["JPDA_ADDRESS"] = "*:$debugPort"
             env["JPDA_TRANSPORT"] = "dt_socket"
         }
         val launchArgs = resolveEffectiveLaunchArgs(server)
@@ -103,11 +105,7 @@ class TomcatManager(private val project: Project) {
         return env
     }
 
-    /**
-     * Patches deployment config files before server start, replicating Eclipse ZIDE behavior.
-     * Reads ZIDE config from the project and patches server.xml, persistence-configurations.xml,
-     * and security-properties.xml with values from zide_properties.xml.
-     */
+    @Suppress("UNUSED_PARAMETER")
     fun patchDeploymentConfigs(server: TomcatServer) {
         val projectPath = project.basePath ?: return
         val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return
@@ -492,6 +490,7 @@ class TomcatManager(private val project: Project) {
         NotificationUtil.info(project, "Deployment completed on ${server.name}.")
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun runProjectOnServer(
         server: TomcatServer,
         projectPath: String,
@@ -513,6 +512,7 @@ class TomcatManager(private val project: Project) {
         return warFile
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun debugProjectOnServer(
         server: TomcatServer,
         projectPath: String,
@@ -555,20 +555,21 @@ class TomcatManager(private val project: Project) {
         return null
     }
 
-    companion object {
-        private const val DEFAULT_VM_ARGS = "-Dcatalina.base=. -Dcatalina.home=. -Djava.io.tmpdir=./temp " +
-            "-Duse.apache=false -Duse.compression=false -Dserver.stats=10000 -Dlog.dir=. " +
-            "-Ddb.home=./../mysql -Dcheck.tomcatport=false -Dcom.adventnet.workengine.serverid= " +
-            "-Dfile.encoding=utf8 -Djava.awt.headless=true " +
-            "-Dcom.adventnet.mfw.bean.BeanProxy=com.adventnet.sas.share.ExtendedBeanProxy " +
-            "-Djava.util.logging.config.file=./conf/logging.properties " +
-            "-Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager " +
-            "-Ddb.vendor.name=mysql -Dis.proto=true " +
-            "-DsocksHost=zcode-socksproxy -DsocksPort=5050 " +
-            "-Xmx700M -Xms300M -XX:MetaspaceSize=256M -XX:MaxMetaspaceSize=512M " +
-            "-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=3128 " +
-            "-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=3128"
+    override fun dispose() {
+        serverProcesses.values.forEach { handler ->
+            if (!handler.isProcessTerminated) {
+                handler.destroyProcess()
+            }
+        }
+        for (server in serverProvider.getServers()) {
+            if (server.status == "running" && PortUtil.isPortInUse(server.port)) {
+                forceKillByPort(server.port)
+            }
+        }
+        serverProcesses.clear()
+    }
 
+    companion object {
         fun getInstance(project: Project): TomcatManager =
             project.getService(TomcatManager::class.java)
     }

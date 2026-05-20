@@ -13,6 +13,7 @@ import javax.swing.tree.DefaultMutableTreeNode
 
 object TomcatTreePopupHandler {
 
+    @Suppress("UNUSED_PARAMETER")
     fun install(tree: JTree, project: Project, serverProvider: TomcatServerProvider, treeModel: TomcatTreeModel) {
         tree.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {

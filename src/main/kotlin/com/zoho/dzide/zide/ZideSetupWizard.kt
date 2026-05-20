@@ -124,6 +124,7 @@ object ZideSetupWizard {
         return selected
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun askUserForZideFolder(project: Project, projectPath: String): String? {
         val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
             .withTitle("Select zide Folder")

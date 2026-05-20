@@ -1,0 +1,16 @@
+---
+description: Automatically run plugin build after fixing issues or adding features
+alwaysApply: true
+---
+
+# Auto-Build After Changes
+
+After fixing a bug or implementing a feature in this IntelliJ plugin project, always run the Gradle build to produce the plugin zip:
+
+```bash
+./gradlew clean buildPlugin
+```
+
+This compiles, tests, and produces the distributable zip at `build/distributions/zide-intelliJ-plugin-{version}.zip`.
+
+Run this as the final step before reporting completion to the user. If the build fails, fix the errors before finishing.

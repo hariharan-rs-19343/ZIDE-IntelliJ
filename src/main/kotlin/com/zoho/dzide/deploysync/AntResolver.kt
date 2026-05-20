@@ -42,6 +42,7 @@ object AntResolver {
         return null
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun resolveAntHome(projectPath: String, persistedAntHome: String?): String? {
         if (isValidAntHome(persistedAntHome)) return persistedAntHome
         detectAntHomeFromEnvironment()?.let { return it }

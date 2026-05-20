@@ -1,7 +1,7 @@
 package com.zoho.dzide.actions
 
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.ToolWindowManager
 import com.zoho.dzide.model.TomcatServer
 import com.zoho.dzide.tomcat.TomcatServerProvider
@@ -11,14 +11,9 @@ import javax.swing.tree.DefaultMutableTreeNode
 
 object ServerActionUtil {
 
-    /**
-     * Gets the selected server from the tool window tree.
-     * If nothing is selected, shows a popup picker to choose a server.
-     */
     fun getSelectedServer(e: AnActionEvent): TomcatServer? {
         val project = e.project ?: return null
 
-        // Try to get from tree selection in tool window
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("SAS-ZIDE")
         if (toolWindow != null) {
             val content = toolWindow.contentManager.selectedContent
@@ -32,7 +27,6 @@ object ServerActionUtil {
             }
         }
 
-        // Fallback: pick from all servers
         val serverProvider = TomcatServerProvider.getInstance(project)
         val servers = serverProvider.getServers()
         if (servers.isEmpty()) {
@@ -41,18 +35,17 @@ object ServerActionUtil {
         }
         if (servers.size == 1) return servers[0]
 
-        // Show picker for multiple servers
-        var chosen: TomcatServer? = null
-        JBPopupFactory.getInstance()
-            .createPopupChooserBuilder(servers)
-            .setTitle("Select Tomcat Server")
-            .setRenderer { _, value, _, _, _ ->
-                javax.swing.JLabel("${value.name} (port ${value.port}) — ${value.status}")
-            }
-            .setItemChosenCallback { chosen = it }
-            .createPopup()
-            .showInFocusCenter()
-        return chosen
+        val serverNames = servers.map { "${it.name} (port ${it.port}) — ${it.status}" }.toTypedArray()
+        val selectedIndex = Messages.showChooseDialog(
+            project,
+            "Select the Tomcat server to use:",
+            "Select Tomcat Server",
+            null,
+            serverNames,
+            serverNames[0]
+        )
+        if (selectedIndex < 0) return null
+        return servers[selectedIndex]
     }
 
     private fun findTree(component: java.awt.Component): JTree? {

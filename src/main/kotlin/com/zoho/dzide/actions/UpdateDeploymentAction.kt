@@ -12,6 +12,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.zoho.dzide.deploysync.AntResolver
 import com.zoho.dzide.model.TomcatServer
 import com.zoho.dzide.tomcat.TomcatManager
+import com.zoho.dzide.util.ConsoleUtil
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.PortUtil
 import com.zoho.dzide.util.ProcessUtil
@@ -88,17 +89,17 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
             }
 
             console.clear()
-            printToConsole(console, project, "=== Update Deployment ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-            printToConsole(console, project, "Zip file: $zipPath\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-            printToConsole(console, project, "Deploy to: $deployDir\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-            printToConsole(console, project, "Repository: $repositoryPath\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-            printToConsole(console, project, "Service: $parentService\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+            ConsoleUtil.print(console, project, "=== Update Deployment ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+            ConsoleUtil.print(console, project, "Zip file: $zipPath\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+            ConsoleUtil.print(console, project, "Deploy to: $deployDir\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+            ConsoleUtil.print(console, project, "Repository: $repositoryPath\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+            ConsoleUtil.print(console, project, "Service: $parentService\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 // Step 1: Stop server if running
                 if (PortUtil.isPortInUse(server.port)) {
-                    printToConsole(console, project, "[Stop] Server ${server.name} is running. Stopping...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                    ConsoleUtil.print(console, project, "[Stop] Server ${server.name} is running. Stopping...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                     ApplicationManager.getApplication().invokeLater {
                         if (!project.isDisposed) {
                             tomcatManager.stopServer(server)
@@ -106,9 +107,9 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
                     }
                     val stopped = PortUtil.waitForPortRelease(server.port, 30000)
                     if (stopped) {
-                        printToConsole(console, project, "[Stop] Server stopped.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                        ConsoleUtil.print(console, project, "[Stop] Server stopped.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                     } else {
-                        printToConsole(console, project, "[Stop] WARNING: Server may still be running. Proceeding anyway.\n\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
+                        ConsoleUtil.print(console, project, "[Stop] WARNING: Server may still be running. Proceeding anyway.\n\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
                     }
                 }
 
@@ -116,74 +117,74 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
                 Files.createDirectories(deployDir)
                 val destZip = deployDir.resolve(zipPath.name)
 
-                printToConsole(console, project, "[1/5] Copying ${zipPath.name} to $deployDir...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "[1/5] Copying ${zipPath.name} to $deployDir...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 Files.copy(zipPath, destZip, StandardCopyOption.REPLACE_EXISTING)
-                printToConsole(console, project, "Copied successfully.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "Copied successfully.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
                 // Step 3: Extract zip in deployment folder
-                printToConsole(console, project, "[2/5] Extracting ${zipPath.name}...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "[2/5] Extracting ${zipPath.name}...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 val unzipResult = ProcessUtil.executeCapturing(
                     command = listOf("unzip", "-o", destZip.toString(), "-d", deployDir.toString()),
                     workingDir = deployDir.toString(),
                     timeoutMs = 120_000
                 )
                 if (unzipResult.stdout.isNotBlank()) {
-                    printToConsole(console, project, unzipResult.stdout + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
+                    ConsoleUtil.print(console, project, unzipResult.stdout + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
                 }
                 if (unzipResult.stderr.isNotBlank()) {
-                    printToConsole(console, project, unzipResult.stderr + "\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, unzipResult.stderr + "\n", ConsoleViewContentType.ERROR_OUTPUT)
                 }
                 if (unzipResult.exitCode != 0) {
-                    printToConsole(console, project, "\nExtract FAILED (exit code ${unzipResult.exitCode})\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "\nExtract FAILED (exit code ${unzipResult.exitCode})\n", ConsoleViewContentType.ERROR_OUTPUT)
                     NotificationUtil.error(project, "Extraction failed.")
                     return@executeOnPooledThread
                 }
-                printToConsole(console, project, "Extracted successfully.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "Extracted successfully.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
                 // Step 4: Unzip ROOT.war as product_name in webapps
                 val webappsDir = deployDir.resolve("AdventNet").resolve("Sas").resolve("tomcat").resolve("webapps")
                 val rootWar = webappsDir.resolve("ROOT.war")
                 if (!rootWar.exists()) {
-                    printToConsole(console, project, "ERROR: ROOT.war not found at $rootWar\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "ERROR: ROOT.war not found at $rootWar\n", ConsoleViewContentType.ERROR_OUTPUT)
                     NotificationUtil.error(project, "ROOT.war not found in webapps.")
                     return@executeOnPooledThread
                 }
 
                 val productDir = webappsDir.resolve(parentService)
                 Files.createDirectories(productDir)
-                printToConsole(console, project, "[3/5] Unzipping ROOT.war as $parentService...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "[3/5] Unzipping ROOT.war as $parentService...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 val warUnzipResult = ProcessUtil.executeCapturing(
                     command = listOf("unzip", "-o", rootWar.toString(), "-d", productDir.toString()),
                     workingDir = webappsDir.toString(),
                     timeoutMs = 120_000
                 )
                 if (warUnzipResult.stdout.isNotBlank()) {
-                    printToConsole(console, project, warUnzipResult.stdout + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
+                    ConsoleUtil.print(console, project, warUnzipResult.stdout + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
                 }
                 if (warUnzipResult.stderr.isNotBlank()) {
-                    printToConsole(console, project, warUnzipResult.stderr + "\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, warUnzipResult.stderr + "\n", ConsoleViewContentType.ERROR_OUTPUT)
                 }
                 if (warUnzipResult.exitCode != 0) {
-                    printToConsole(console, project, "\nWAR extract FAILED (exit code ${warUnzipResult.exitCode})\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "\nWAR extract FAILED (exit code ${warUnzipResult.exitCode})\n", ConsoleViewContentType.ERROR_OUTPUT)
                     NotificationUtil.error(project, "ROOT.war extraction failed.")
                     return@executeOnPooledThread
                 }
-                printToConsole(console, project, "ROOT.war extracted to $parentService/\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "ROOT.war extracted to $parentService/\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
                 // Step 5: Delete all *.war files from webapps
-                printToConsole(console, project, "[4/5] Deleting *.war files from webapps...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "[4/5] Deleting *.war files from webapps...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 Files.list(webappsDir).use { stream ->
                     stream.filter { it.extension == "war" }.forEach { warFile ->
                         Files.delete(warFile)
-                        printToConsole(console, project, "Deleted: ${warFile.name}\n", ConsoleViewContentType.NORMAL_OUTPUT)
+                        ConsoleUtil.print(console, project, "Deleted: ${warFile.name}\n", ConsoleViewContentType.NORMAL_OUTPUT)
                     }
                 }
-                printToConsole(console, project, "WAR files cleaned up.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "WAR files cleaned up.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
                 // Resolve ANT
                 val antHome = AntResolver.resolveAntHome(projectPath!!, server.antHomeResolvedPath)
                 if (antHome == null) {
-                    printToConsole(console, project, "ERROR: ANT not found. Set ANT_HOME in ~/.zshrc\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "ERROR: ANT not found. Set ANT_HOME in ~/.zshrc\n", ConsoleViewContentType.ERROR_OUTPUT)
                     NotificationUtil.error(project, "ANT not found. Set ANT_HOME in ~/.zshrc")
                     return@executeOnPooledThread
                 }
@@ -192,29 +193,29 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
                 val buildXml = Path.of(hookBaseDir, "build.xml").toString()
 
                 if (!Path.of(buildXml).exists()) {
-                    printToConsole(console, project, "ERROR: build.xml not found at $buildXml. Hooks skipped.\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "ERROR: build.xml not found at $buildXml. Hooks skipped.\n", ConsoleViewContentType.ERROR_OUTPUT)
                     NotificationUtil.error(project, "build.xml not found. Hooks skipped.")
                     return@executeOnPooledThread
                 }
 
                 // Step 5a: Pre-creation hook
-                printToConsole(console, project, "[5/5] Running ANT hooks...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                printToConsole(console, project, "  Running pre-creation hook...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "[5/5] Running ANT hooks...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "  Running pre-creation hook...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 val preCreationOk = runAntHook(
                     console, project, antExec, buildXml, hookBaseDir,
                     "precreationhook", repositoryPath, deploymentPath, parentService,
                     emptyMap()
                 )
                 if (!preCreationOk) {
-                    printToConsole(console, project, "  Pre-creation hook FAILED.\n\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "  Pre-creation hook FAILED.\n\n", ConsoleViewContentType.ERROR_OUTPUT)
                 } else {
-                    printToConsole(console, project, "  Pre-creation hook completed.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                    ConsoleUtil.print(console, project, "  Pre-creation hook completed.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 }
 
                 // Step 5b: Post-creation hook (uses zide_build basedir)
                 val postHookBaseDir = Path.of(repositoryPath, ".zide_resources", "zide_build").toString()
                 val postBuildXml = Path.of(postHookBaseDir, "build.xml").toString()
-                printToConsole(console, project, "  Running post-creation hook...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "  Running post-creation hook...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 val postCreationOk = runAntHook(
                     console, project, antExec, postBuildXml, postHookBaseDir,
                     "postservicetarget", repositoryPath, deploymentPath, parentService,
@@ -225,26 +226,26 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
                     )
                 )
                 if (!postCreationOk) {
-                    printToConsole(console, project, "  Post-creation hook FAILED.\n\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "  Post-creation hook FAILED.\n\n", ConsoleViewContentType.ERROR_OUTPUT)
                 } else {
-                    printToConsole(console, project, "  Post-creation hook completed.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                    ConsoleUtil.print(console, project, "  Post-creation hook completed.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 }
 
                 // Step 5c: Zide module hook
-                printToConsole(console, project, "  Running zide module hook...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "  Running zide module hook...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 val moduleHookOk = runAntHook(
                     console, project, antExec, buildXml, hookBaseDir,
                     "zidemodulehook", repositoryPath, deploymentPath, parentService,
                     emptyMap()
                 )
                 if (!moduleHookOk) {
-                    printToConsole(console, project, "  Zide module hook FAILED.\n\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    ConsoleUtil.print(console, project, "  Zide module hook FAILED.\n\n", ConsoleViewContentType.ERROR_OUTPUT)
                 } else {
-                    printToConsole(console, project, "  Zide module hook completed.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                    ConsoleUtil.print(console, project, "  Zide module hook completed.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 }
 
                 // Step 6: Patch deployment config files
-                printToConsole(console, project, "[6/6] Patching deployment config files...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "[6/6] Patching deployment config files...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 val patchCtx = DeploymentConfigPatcher.buildPatchContext(
                     zideConfig.service?.properties ?: emptyMap(),
                     zideProps
@@ -252,29 +253,29 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
                 if (patchCtx != null) {
                     val patchResult = DeploymentConfigPatcher.patchAll(patchCtx)
                     if (patchResult.serverXmlPatched)
-                        printToConsole(console, project, "  Patched server.xml (Context element, shutdown port)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                        ConsoleUtil.print(console, project, "  Patched server.xml (Context element, shutdown port)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                     if (patchResult.webXmlPatched)
-                        printToConsole(console, project, "  Patched web.xml (JSP servlet for dynamic compilation)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                        ConsoleUtil.print(console, project, "  Patched web.xml (JSP servlet for dynamic compilation)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                     if (patchResult.persistencePatched)
-                        printToConsole(console, project, "  Patched persistence-configurations.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                        ConsoleUtil.print(console, project, "  Patched persistence-configurations.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                     if (patchResult.securityPatched)
-                        printToConsole(console, project, "  Patched security-properties.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                        ConsoleUtil.print(console, project, "  Patched security-properties.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                     for (err in patchResult.errors) {
-                        printToConsole(console, project, "  Patch error: $err\n", ConsoleViewContentType.ERROR_OUTPUT)
+                        ConsoleUtil.print(console, project, "  Patch error: $err\n", ConsoleViewContentType.ERROR_OUTPUT)
                     }
                     if (!patchResult.serverXmlPatched && !patchResult.webXmlPatched && !patchResult.persistencePatched && !patchResult.securityPatched && patchResult.errors.isEmpty()) {
-                        printToConsole(console, project, "  Config files already up to date.\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                        ConsoleUtil.print(console, project, "  Config files already up to date.\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                     }
                 } else {
-                    printToConsole(console, project, "  Skipped: missing DEPLOYMENT_FOLDER or PARENT_SERVICE.\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
+                    ConsoleUtil.print(console, project, "  Skipped: missing DEPLOYMENT_FOLDER or PARENT_SERVICE.\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
                 }
-                printToConsole(console, project, "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
-                printToConsole(console, project, "=== Deployment update completed ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                ConsoleUtil.print(console, project, "=== Deployment update completed ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                 NotificationUtil.info(project, "Deployment updated successfully.")
 
             } catch (ex: Exception) {
-                printToConsole(console, project, "Error: ${ex.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
+                ConsoleUtil.print(console, project, "Error: ${ex.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
                 NotificationUtil.error(project, "Update deployment failed: ${ex.message}")
             }
         }
@@ -328,7 +329,7 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
             extraArgs
         )
 
-        printToConsole(console, project, "$ ${command.last()}\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+        ConsoleUtil.print(console, project, "$ ${command.last()}\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
         val result = ProcessUtil.executeCapturing(
             command = command,
@@ -337,26 +338,13 @@ class UpdateDeploymentAction : AnAction("Update Deployment", "Deploy a zip file 
         )
 
         if (result.stdout.isNotBlank()) {
-            printToConsole(console, project, result.stdout + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
+            ConsoleUtil.print(console, project, result.stdout + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
         }
         if (result.stderr.isNotBlank()) {
-            printToConsole(console, project, result.stderr + "\n", ConsoleViewContentType.ERROR_OUTPUT)
+            ConsoleUtil.print(console, project, result.stderr + "\n", ConsoleViewContentType.ERROR_OUTPUT)
         }
 
         return result.exitCode == 0
-    }
-
-    private fun printToConsole(
-        console: ConsoleView,
-        project: Project,
-        text: String,
-        type: ConsoleViewContentType
-    ) {
-        ApplicationManager.getApplication().invokeLater {
-            if (!project.isDisposed) {
-                console.print(text, type)
-            }
-        }
     }
 
     override fun update(e: AnActionEvent) {

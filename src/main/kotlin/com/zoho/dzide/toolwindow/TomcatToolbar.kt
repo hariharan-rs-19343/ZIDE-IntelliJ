@@ -8,6 +8,7 @@ import com.zoho.dzide.tomcat.TomcatServerProvider
 
 object TomcatToolbar {
 
+    @Suppress("UNUSED_PARAMETER")
     fun create(project: Project, serverProvider: TomcatServerProvider, treeModel: TomcatTreeModel): ActionToolbar {
         val am = ActionManager.getInstance()
         val group = DefaultActionGroup()

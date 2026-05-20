@@ -45,7 +45,7 @@ class TomcatRunState(
         val envVars = mutableMapOf("CATALINA_PID" to "pid.file")
         if (launchMode == LaunchMode.DEBUG) {
             val debugPort = PortUtil.findAvailablePort(server.debugPort ?: 5005)
-            envVars["JPDA_ADDRESS"] = debugPort.toString()
+            envVars["JPDA_ADDRESS"] = "*:$debugPort"
             envVars["JPDA_TRANSPORT"] = "dt_socket"
             serverProvider.updateServer(server.id, mapOf("debugPort" to debugPort))
         }

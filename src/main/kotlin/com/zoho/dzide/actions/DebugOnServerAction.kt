@@ -54,6 +54,11 @@ class DebugOnServerAction : AnAction("Debug", "Start server in debug mode and at
                                 if (remoteConfig != null) {
                                     remoteConfig.HOST = "localhost"
                                     remoteConfig.PORT = debugPort.toString()
+                                    val moduleManager = com.intellij.openapi.module.ModuleManager.getInstance(project)
+                                    val modules = moduleManager.modules
+                                    if (modules.isNotEmpty()) {
+                                        remoteConfig.setModule(modules.first())
+                                    }
                                     settings.isTemporary = true
                                     runManager.addConfiguration(settings)
                                     runManager.selectedConfiguration = settings

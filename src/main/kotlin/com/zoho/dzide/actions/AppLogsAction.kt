@@ -6,7 +6,9 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.zoho.dzide.tomcat.TomcatManager
+import com.zoho.dzide.util.ConsoleUtil
 import com.zoho.dzide.util.NotificationUtil
+import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.exists
@@ -14,6 +16,10 @@ import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 
 class AppLogsAction : AnAction("App Logs", "Show application logs from server logs directory", null) {
+
+    companion object {
+        private const val MAX_TAIL_LINES = 5000
+    }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -35,7 +41,6 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
                 return@ensureToolWindow
             }
 
-            // Find the latest *.application0.txt file
             val logFile = Files.list(logsDir).use { stream ->
                 stream.filter { it.isRegularFile() && it.name.endsWith("application0.txt") }
                     .sorted(Comparator.comparingLong<Path> { Files.getLastModifiedTime(it).toMillis() }.reversed())
@@ -49,12 +54,12 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
             }
 
             console.clear()
-            console.print("=== Log file: $logFile ===\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+            console.print("=== Log file: $logFile (last $MAX_TAIL_LINES lines) ===\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
-            // Read and display the entire file
             ApplicationManager.getApplication().executeOnPooledThread {
                 try {
-                    Files.readAllLines(logFile, Charsets.UTF_8).forEach { line ->
+                    val lines = readTailLines(logFile, MAX_TAIL_LINES)
+                    for (line in lines) {
                         val contentType = when {
                             line.contains("ERROR") || line.contains("SEVERE") ->
                                 ConsoleViewContentType.ERROR_OUTPUT
@@ -62,20 +67,30 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
                                 ConsoleViewContentType.LOG_WARNING_OUTPUT
                             else -> ConsoleViewContentType.NORMAL_OUTPUT
                         }
-                        ApplicationManager.getApplication().invokeLater {
-                            if (!project.isDisposed) {
-                                console.print("$line\n", contentType)
-                            }
-                        }
+                        ConsoleUtil.print(console, project, "$line\n", contentType)
                     }
                 } catch (ex: Exception) {
-                    ApplicationManager.getApplication().invokeLater {
-                        if (!project.isDisposed) {
-                            console.print("Error reading log file: ${ex.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
-                        }
-                    }
+                    ConsoleUtil.print(console, project, "Error reading log file: ${ex.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
                 }
             }
+        }
+    }
+
+    private fun readTailLines(file: Path, maxLines: Int): List<String> {
+        val fileSize = Files.size(file)
+        if (fileSize == 0L) return emptyList()
+
+        RandomAccessFile(file.toFile(), "r").use { raf ->
+            val bufferSize = minOf(fileSize, 1024L * 1024L * 8L)
+            val startPos = maxOf(0L, fileSize - bufferSize)
+            raf.seek(startPos)
+            val bytes = ByteArray((fileSize - startPos).toInt())
+            raf.readFully(bytes)
+            val content = String(bytes, Charsets.UTF_8)
+            val allLines = content.lines()
+            val dropFirst = startPos > 0
+            val lines = if (dropFirst) allLines.drop(1) else allLines
+            return if (lines.size > maxLines) lines.takeLast(maxLines) else lines
         }
     }
 
