@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.exists
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.readText
+import kotlin.io.path.writeText
 import org.w3c.dom.Element
 import org.w3c.dom.NodeList
 import javax.xml.parsers.DocumentBuilderFactory
@@ -194,5 +195,18 @@ object ZideConfigParser {
         val zideResourcesPath = Path.of(projectPath, ".zide_resources")
         return zideResourcesPath.resolve("service.xml").exists() &&
                 zideResourcesPath.resolve("zide_properties.xml").exists()
+    }
+
+    fun writePropertiesToXml(projectPath: String, serviceKey: String, updates: Map<String, String>) {
+        val propertiesXmlPath = Path.of(projectPath, ".zide_resources", "zide_properties.xml")
+        if (!propertiesXmlPath.exists()) return
+
+        var content = propertiesXmlPath.readText()
+        for ((name, value) in updates) {
+            val regex = Regex("""(<property\s+name="${Regex.escape(name)}"\s+value=")[^"]*("/)""")
+            content = regex.replace(content, "$1${Regex.escapeReplacement(value)}$2")
+        }
+        propertiesXmlPath.writeText(content)
+        inMemoryCache.remove(projectPath)
     }
 }

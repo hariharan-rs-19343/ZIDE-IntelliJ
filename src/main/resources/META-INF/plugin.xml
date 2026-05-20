@@ -32,6 +32,7 @@
     <change-notes><![CDATA[
         <b>0.0.5</b>
         <ul>
+            <li>Deployment Properties editor — view and edit ZIDE properties (Host Name, IAM Server, ports, etc.) from the ZIDE menu; read-only mode when server is running</li>
             <li>Kill Tomcat servers on IDE quit/restart — servers are now properly stopped when IntelliJ closes</li>
             <li>Breakpoints fix — debug sessions now set the module classpath so breakpoints resolve to source files</li>
             <li>JPDA address uses *:port format for JDK 9+ compatibility</li>
@@ -39,7 +40,7 @@
             <li>Server picker fix — multi-server selection now uses a modal dialog instead of async popup</li>
             <li>App Logs tail-read — only loads last 5000 lines to prevent OOM on large log files</li>
             <li>Build output fix — ANT console output no longer shows extra empty lines</li>
-            <li>Removed stale META-INF/plugin.xml and dead code</li>
+            <li>Code cleanup — removed stale files, dead code, and extracted shared utilities</li>
         </ul>
         <b>0.0.4</b>
         <ul>
@@ -191,6 +192,12 @@
                     text="Update Deployment"
                     description="Deploy a zip file to the server"
                     icon="AllIcons.Actions.Upload"/>
+
+            <action id="dzide.DeploymentProperties"
+                    class="com.zoho.dzide.actions.DeploymentPropertiesAction"
+                    text="Deployment Properties"
+                    description="Edit ZIDE deployment properties"
+                    icon="AllIcons.General.Settings"/>
 
             <action id="dzide.AppLogs"
                     class="com.zoho.dzide.actions.AppLogsAction"

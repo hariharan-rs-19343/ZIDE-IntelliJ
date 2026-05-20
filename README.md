@@ -8,13 +8,16 @@ Tomcat server management and ZIDE integration for IntelliJ IDEA.
 - **Run / Debug** — Start Tomcat in foreground mode (`catalina.sh run`) or debug mode with JPDA auto-attach
 - **Restart** — Restart a running server with a single click from the toolbar
 - **Stop** — Gracefully stop the attached Tomcat process with multi-level fallback
+- **Deployment Properties** — View and edit ZIDE deployment properties (Host Name, IAM Server, Schema, ports); read-only when server is running
 - **Deployment Config Patching** — Automatically patches server.xml, web.xml, persistence, and security configs before server start
 - **Pre-Start Setup** — Runs postzidedeploy.sh and syncs server.xml files between directories before launch
 - **Build** — Run ANT build scripts from the project directory
 - **Update Deployment** — Deploy a zip file to the ZIDE deployment folder with full pipeline (extract, ANT hooks, config patching)
-- **App Logs** — View application logs in a dedicated tool window tab with color-coded ERROR/WARN highlighting
+- **App Logs** — View application logs (last 5000 lines) with color-coded ERROR/WARN highlighting
 - **Deploy Sync on Save** — Automatically copy compiled classes, run ANT hooks, and sync resources on file save
+- **Hot-Swap** — Java class changes are hot-swapped into the running JVM via JDWP when a debug session is active
 - **ZIDE Auto-Configuration** — Detect and import Eclipse ZIDE project settings (`.zide_resources/`)
+- **Auto-Cleanup** — Tomcat servers are killed when IntelliJ quits or restarts
 
 ## Requirements
 
@@ -25,10 +28,10 @@ Tomcat server management and ZIDE integration for IntelliJ IDEA.
 ## Building
 
 ```bash
-./gradlew clean build
+./gradlew clean buildPlugin
 ```
 
-The plugin zip will be in `build/distributions/`.
+The plugin zip will be in `build/distributions/zide-intelliJ-plugin-{version}.zip`.
 
 ## Running in Sandbox
 
@@ -76,4 +79,5 @@ Available under **ZIDE** in the main menu bar:
 | Refresh | | Refresh all server statuses |
 | Build | `Ctrl+Shift+B` | Run ANT build |
 | Update Deployment | | Deploy zip to server |
+| Deployment Properties | | Edit ZIDE deployment properties |
 | App Logs | | View application logs |
