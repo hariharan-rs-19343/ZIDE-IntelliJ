@@ -23,7 +23,6 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val server = ServerActionUtil.getSelectedServer(e) ?: return
         val tomcatManager = TomcatManager.getInstance(project)
 
         val settings = ZideSettingsState.getInstance()
@@ -126,7 +125,12 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
                         indicator.isIndeterminate = true
                         ConsoleUtil.print(console, project, "--- Proceeding with deployment ---\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
-                        UpdateDeploymentAction.runDeploymentCore(project, server, tomcatManager, tempFile, console)
+                        val server = resolveServer(project)
+                        if (server != null) {
+                            UpdateDeploymentAction.runDeploymentCore(project, server, tomcatManager, tempFile, console)
+                        } else {
+                            ConsoleUtil.print(console, project, "ERROR: Cannot resolve deployment folder. Check .zide_resources/service.xml\n", ConsoleViewContentType.ERROR_OUTPUT)
+                        }
 
                     } catch (ex: Exception) {
                         ConsoleUtil.print(console, project, "Error: ${ex.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
@@ -139,6 +143,24 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
                 }
             })
         }
+    }
+
+    private fun resolveServer(project: com.intellij.openapi.project.Project): com.zoho.dzide.model.TomcatServer? {
+        val serverProvider = com.zoho.dzide.tomcat.TomcatServerProvider.getInstance(project)
+        val servers = serverProvider.getServers()
+        if (servers.isNotEmpty()) return servers.first()
+
+        val projectPath = project.basePath ?: return null
+        val zideConfig = com.zoho.dzide.zide.ZideConfigParser.readZideConfig(projectPath) ?: return null
+        val deploymentFolder = zideConfig.service?.properties?.get("ZIDE.DEPLOYMENT_FOLDER") ?: return null
+        val parentService = zideConfig.service?.properties?.get("ZIDE.PARENT_SERVICE") ?: ""
+        val tomcatPath = "$deploymentFolder/AdventNet/Sas/tomcat"
+
+        return com.zoho.dzide.model.TomcatServer(
+            name = parentService.ifBlank { "ZIDE" },
+            path = tomcatPath,
+            zideRuntimeProperties = zideConfig.service?.properties
+        )
     }
 
     private fun parseWgetProgress(text: String): Double? {

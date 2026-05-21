@@ -89,7 +89,7 @@ object ZideSetupWizard {
         val zideBuildBaseDir = Path.of(projectPath, ".zide_resources", "zide_build").toString()
         val zideBuildXmlPath = Path.of(zideBuildBaseDir, "build.xml").toString()
 
-        val serverName = "ZIDE-$serviceKey${if (tomcatVersion != null) " ($tomcatVersion)" else ""}"
+        val serverName = "ZIDE-$serviceKey${if (!tomcatVersion.isNullOrBlank()) " ($tomcatVersion)" else ""}"
         return TomcatServer(
             id = System.currentTimeMillis().toString(),
             name = serverName,

@@ -30,7 +30,6 @@ object ServerActionUtil {
         val serverProvider = TomcatServerProvider.getInstance(project)
         val servers = serverProvider.getServers()
         if (servers.isEmpty()) {
-            NotificationUtil.error(project, "No Tomcat servers configured. Please add a server first.")
             return null
         }
         if (servers.size == 1) return servers[0]

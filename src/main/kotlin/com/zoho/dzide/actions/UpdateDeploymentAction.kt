@@ -31,7 +31,6 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val server = ServerActionUtil.getSelectedServer(e) ?: return
         val tomcatManager = TomcatManager.getInstance(project)
 
         val descriptor = FileChooserDescriptor(true, false, true, true, false, false)
@@ -45,7 +44,12 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
         val selectedFile = files.firstOrNull() ?: return
         val zipPath = Path.of(selectedFile.path)
 
-        runDeployment(project, server, tomcatManager, zipPath)
+        val server = ServerActionUtil.getSelectedServer(e)
+        if (server != null) {
+            runDeployment(project, server, tomcatManager, zipPath)
+        } else {
+            runDeploymentWithoutServer(project, tomcatManager, zipPath)
+        }
     }
 
     override fun update(e: AnActionEvent) {
@@ -53,6 +57,25 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
     }
 
     companion object {
+
+        fun runDeploymentWithoutServer(project: Project, tomcatManager: TomcatManager, zipPath: Path) {
+            val projectPath = project.basePath
+            val zideConfig = projectPath?.let { ZideConfigParser.readZideConfig(it) }
+            val deploymentFolder = zideConfig?.service?.properties?.get("ZIDE.DEPLOYMENT_FOLDER")
+            if (deploymentFolder.isNullOrBlank()) {
+                NotificationUtil.error(project, "ZIDE.DEPLOYMENT_FOLDER not found in .zide_resources/service.xml. Add a Tomcat server first.")
+                return
+            }
+            val parentService = zideConfig.service?.properties?.get("ZIDE.PARENT_SERVICE") ?: ""
+            val tomcatPath = "$deploymentFolder/AdventNet/Sas/tomcat"
+
+            val tempServer = TomcatServer(
+                name = parentService.ifBlank { "ZIDE" },
+                path = tomcatPath,
+                zideRuntimeProperties = zideConfig.service?.properties
+            )
+            runDeployment(project, tempServer, tomcatManager, zipPath)
+        }
 
         fun runDeployment(project: Project, server: TomcatServer, tomcatManager: TomcatManager, zipPath: Path) {
             tomcatManager.ensureToolWindow {

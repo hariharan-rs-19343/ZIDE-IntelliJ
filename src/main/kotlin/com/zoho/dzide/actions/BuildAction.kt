@@ -20,13 +20,11 @@ class BuildAction : AnAction("Build", "Run ANT build script", null) {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val projectPath = project.basePath ?: return
-        val server = ServerActionUtil.getSelectedServer(e) ?: return
         val tomcatManager = TomcatManager.getInstance(project)
 
         tomcatManager.ensureToolWindow {
             val console = tomcatManager.consoleView ?: return@ensureToolWindow
 
-            // Switch to Output tab
             val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("SAS-ZIDE")
             val outputContent = toolWindow?.contentManager?.findContent("Output")
             if (outputContent != null) {
@@ -41,10 +39,9 @@ class BuildAction : AnAction("Build", "Run ANT build script", null) {
                 return@ensureToolWindow
             }
 
-            // Resolve ANT
-            val antHome = AntResolver.resolveAntHome(projectPath, server.antHomeResolvedPath)
+            val antHome = AntResolver.resolveAntHome(projectPath, null)
             if (antHome == null) {
-                NotificationUtil.error(project, "ANT not found. Set ANT_HOME in ~/.zshrc")
+                NotificationUtil.error(project, "ANT not found. Set ANT_HOME in ~/.zshrc or Settings > Tools > Zide")
                 return@ensureToolWindow
             }
             val antExe = AntResolver.resolveAntExecutable(antHome)

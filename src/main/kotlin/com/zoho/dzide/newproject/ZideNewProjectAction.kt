@@ -360,7 +360,7 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
             appendLine("""    <property name="ZIDE.REPO_TYPE" value="2"/>""")
             appendLine("""    <property name="ZIDE.DEPLOY_TYPE" value="M19"/>""")
             appendLine("""    <property name="ZIDE.MI_DEPLOYMENT" value="false"/>""")
-            appendLine("""    <property name="ZIDE.TOMCAT_VERSION" value=""/>""")
+            appendLine("""    <property name="ZIDE.TOMCAT_VERSION" value="${detectTomcatVersion(deploymentDir)}"/>""")
             appendLine("""    <property name="ZIDE.PROJECT_JRE_HOME" value="${result.jdkHomePath}"/>""")
             appendLine("  </service>")
             appendLine("</services>")
@@ -409,6 +409,26 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
         return if (hostname.endsWith(csezDomain)) hostname else "$hostname$csezDomain"
     }
 
+    private fun detectTomcatVersion(deploymentDir: File): String {
+        val catalinaJar = File(deploymentDir, "AdventNet/Sas/tomcat/lib/catalina.jar")
+        if (!catalinaJar.exists()) return ""
+
+        try {
+            val jarFile = java.util.jar.JarFile(catalinaJar)
+            val entry = jarFile.getEntry("org/apache/catalina/util/ServerInfo.properties")
+            if (entry != null) {
+                val props = java.util.Properties()
+                jarFile.getInputStream(entry).use { props.load(it) }
+                jarFile.close()
+                val serverNumber = props.getProperty("server.number", "")
+                val parts = serverNumber.split(".")
+                return if (parts.size >= 2) "${parts[0]}.${parts[1]}" else serverNumber
+            }
+            jarFile.close()
+        } catch (_: Exception) {}
+        return ""
+    }
+
     private fun writeRepositoryProperties(projectDir: File) {
         val zideResources = File(projectDir, ".zide_resources")
         zideResources.mkdirs()
@@ -420,15 +440,221 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
 
     private fun createZideBuildStructure(projectDir: File, deploymentDir: File, result: ZideProjectWizardDialog.WizardResult) {
         val zideResources = File(projectDir, ".zide_resources")
-
         val zideBuildDir = File(zideResources, "zide_build")
-        if (!zideBuildDir.exists()) {
-            zideBuildDir.mkdirs()
-            val buildXml = File(zideBuildDir, "build.xml")
-            if (!buildXml.exists()) {
-                val serviceName = result.name
-                val deploymentPath = File(deploymentDir, "AdventNet/Sas/tomcat").absolutePath
-                buildXml.writeText("""<?xml version="1.0" encoding="UTF-8"?>
+        val zideHookDir = File(zideResources, "zide_hook")
+
+        if (zideBuildDir.exists() && File(zideBuildDir, "build.xml").exists() &&
+            zideHookDir.exists() && File(zideHookDir, "build.xml").exists()) {
+            log.info("zide_build/ and zide_hook/ already exist from cloned repo, skipping copy")
+            return
+        }
+
+        val workspace = File(result.location)
+        val hgUtilsSource = resolveHgUtilsSource(workspace, projectDir)
+
+        if (hgUtilsSource != null) {
+            log.info("Copying shared build files from: ${hgUtilsSource.absolutePath}")
+            copySharedBuildFilesToDir(hgUtilsSource, zideBuildDir)
+            copySharedBuildFilesToDir(hgUtilsSource, zideHookDir)
+            copyServiceAntProperties(workspace, result, zideBuildDir)
+            copyCommonAntProperties(workspace, zideHookDir)
+        } else {
+            log.info("No shared build files found, generating stubs")
+            generateStubBuildStructure(zideBuildDir, zideHookDir, result.name, projectDir, deploymentDir)
+        }
+    }
+
+    /**
+     * Searches for hg_utils/ in this order:
+     * 1. {workspace}/.antsetup/hg_utils/
+     * 2. {workspace}/zide/.zide_resources/ (shared zide config repo -- contains zide_anttasks.xml, etc.)
+     * 3. Sibling project's .zide_resources/zide_build/hg_utils/
+     * 4. Downloads from build server into {workspace}/.antsetup/
+     */
+    private fun resolveHgUtilsSource(workspace: File, projectDir: File): File? {
+        val antSetupHgUtils = File(workspace, ".antsetup/hg_utils")
+        if (antSetupHgUtils.isDirectory && File(antSetupHgUtils, "build/build.xml").exists()) {
+            log.info("Found hg_utils at .antsetup/hg_utils/")
+            return antSetupHgUtils
+        }
+
+        val zideRepoHgUtils = File(workspace, "zide/.zide_resources")
+        if (zideRepoHgUtils.isDirectory) {
+            val zideAnttasks = File(zideRepoHgUtils, "zide_anttasks.xml")
+            if (zideAnttasks.exists()) {
+                log.info("Found zide config repo at zide/.zide_resources/")
+                return zideRepoHgUtils
+            }
+        }
+
+        val siblingDirs = workspace.listFiles { f -> f.isDirectory && f.name != projectDir.name } ?: emptyArray()
+        for (sibling in siblingDirs) {
+            val siblingHgUtils = File(sibling, ".zide_resources/zide_build/hg_utils")
+            if (siblingHgUtils.isDirectory && File(siblingHgUtils, "build/build.xml").exists()) {
+                log.info("Found hg_utils in sibling project: ${sibling.name}")
+                return File(sibling, ".zide_resources/zide_build")
+            }
+        }
+
+        val downloaded = downloadHgUtils(workspace, projectDir)
+        if (downloaded != null) return downloaded
+
+        return null
+    }
+
+    private fun downloadHgUtils(workspace: File, projectDir: File): File? {
+        var hgUtilsUrl = "https://build.zohocorp.com/integ/hg_utils/milestones/stable/hg_utils.zip"
+
+        val projectBuildXml = File(projectDir, "build/build.xml")
+        if (projectBuildXml.exists()) {
+            try {
+                val match = Regex("""src="(https?://[^"]*hg_utils\.zip)"""").find(projectBuildXml.readText())
+                val parsed = match?.groupValues?.get(1)
+                if (!parsed.isNullOrBlank()) {
+                    hgUtilsUrl = parsed
+                    log.info("Parsed hg_utils URL from build/build.xml: $hgUtilsUrl")
+                }
+            } catch (_: Exception) {}
+        }
+
+        val antSetupDir = File(workspace, ".antsetup")
+        antSetupDir.mkdirs()
+        val zipFile = File(antSetupDir, "hg_utils.zip")
+
+        log.info("Downloading hg_utils from: $hgUtilsUrl")
+        val wgetResult = ProcessUtil.executeCapturing(
+            command = listOf("wget", "-q", "-O", zipFile.absolutePath, hgUtilsUrl),
+            timeoutMs = 120_000
+        )
+        if (wgetResult.exitCode != 0) {
+            log.warn("Failed to download hg_utils.zip (exit code ${wgetResult.exitCode})")
+            zipFile.delete()
+            return null
+        }
+
+        if (!zipFile.exists() || zipFile.length() == 0L) {
+            log.warn("Downloaded hg_utils.zip is empty or missing")
+            zipFile.delete()
+            return null
+        }
+
+        val unzipResult = ProcessUtil.executeCapturing(
+            command = listOf("unzip", "-o", zipFile.absolutePath, "-d", antSetupDir.absolutePath),
+            timeoutMs = 60_000
+        )
+        zipFile.delete()
+
+        if (unzipResult.exitCode != 0) {
+            log.warn("Failed to extract hg_utils.zip (exit code ${unzipResult.exitCode})")
+            return null
+        }
+
+        val extracted = File(antSetupDir, "hg_utils")
+        if (extracted.isDirectory && File(extracted, "build/build.xml").exists()) {
+            log.info("Successfully downloaded and extracted hg_utils to .antsetup/")
+            return extracted
+        }
+
+        return null
+    }
+
+    private fun copySharedBuildFilesToDir(source: File, targetDir: File) {
+        targetDir.mkdirs()
+
+        val hgUtilsSrc = if (File(source, "hg_utils").isDirectory) {
+            File(source, "hg_utils")
+        } else if (File(source, "build/build.xml").exists()) {
+            source
+        } else null
+
+        if (hgUtilsSrc != null) {
+            val hgUtilsDest = File(targetDir, "hg_utils")
+            if (!hgUtilsDest.exists()) {
+                hgUtilsSrc.copyRecursively(hgUtilsDest, overwrite = false)
+            }
+
+            val buildXml = File(hgUtilsSrc, "build/build.xml")
+            if (buildXml.exists()) {
+                buildXml.copyTo(File(targetDir, "build.xml"), overwrite = false)
+            }
+            val libraryXml = File(hgUtilsSrc, "build/library.xml")
+            if (libraryXml.exists()) {
+                libraryXml.copyTo(File(targetDir, "library.xml"), overwrite = false)
+            }
+            val precheckProps = File(hgUtilsSrc, "build/precheck.properties")
+            if (precheckProps.exists()) {
+                precheckProps.copyTo(File(targetDir, "precheck.properties"), overwrite = false)
+            }
+
+            val ruleDir = File(hgUtilsSrc, "build/rule")
+            if (ruleDir.isDirectory) {
+                ruleDir.listFiles()?.forEach { ruleFile ->
+                    if (ruleFile.isFile) {
+                        ruleFile.copyTo(File(targetDir, ruleFile.name), overwrite = false)
+                    }
+                }
+            }
+        }
+
+        File(targetDir, "buildlogs").mkdirs()
+    }
+
+    /**
+     * Copies the service-specific zide_ant.properties into zide_build/ant.properties.
+     * This contains postservicetarget, pgsqlreinit, etc.
+     * Source: zide/deployment/{moduleDir}/M19/zide_ant.properties
+     */
+    private fun copyServiceAntProperties(workspace: File, result: ZideProjectWizardDialog.WizardResult, targetDir: File) {
+        if (File(targetDir, "ant.properties").exists()) return
+
+        val moduleDir = result.serviceName.ifBlank { result.name }
+        val deployType = "M19"
+
+        val candidates = listOf(
+            File(workspace, "zide/deployment/$moduleDir/$deployType/zide_ant.properties"),
+            File(workspace, "zide/deployment/${moduleDir}_cloud/$deployType/zide_ant.properties"),
+            File(workspace, "zide/deployment/$moduleDir/zide_ant.properties")
+        )
+
+        for (candidate in candidates) {
+            if (candidate.exists()) {
+                candidate.copyTo(File(targetDir, "ant.properties"), overwrite = false)
+                log.info("Copied service ant.properties from: ${candidate.absolutePath}")
+                return
+            }
+        }
+        log.warn("No service-specific zide_ant.properties found for module: $moduleDir")
+    }
+
+    /**
+     * Copies the common/shared zide_ant.properties into zide_hook/ant.properties.
+     * This contains zidemodulehook_order, precreationhook tasks, etc.
+     * Source: zide/deployment/zide/zide_ant.properties
+     */
+    private fun copyCommonAntProperties(workspace: File, targetDir: File) {
+        if (File(targetDir, "ant.properties").exists()) return
+
+        val candidates = listOf(
+            File(workspace, "zide/deployment/zide/zide_ant.properties"),
+            File(workspace, "zide/deployment/cide_common_tasks/M19/zide_ant.properties")
+        )
+
+        for (candidate in candidates) {
+            if (candidate.exists()) {
+                candidate.copyTo(File(targetDir, "ant.properties"), overwrite = false)
+                log.info("Copied common ant.properties from: ${candidate.absolutePath}")
+                return
+            }
+        }
+        log.warn("No common zide_ant.properties found in zide repo")
+    }
+
+    private fun generateStubBuildStructure(zideBuildDir: File, zideHookDir: File, serviceName: String, projectDir: File, deploymentDir: File) {
+        zideBuildDir.mkdirs()
+        val buildXml = File(zideBuildDir, "build.xml")
+        if (!buildXml.exists()) {
+            val deploymentPath = File(deploymentDir, "AdventNet/Sas/tomcat").absolutePath
+            buildXml.writeText("""<?xml version="1.0" encoding="UTF-8"?>
 <project name="zide-build-${serviceName}" default="postservicetarget" basedir=".">
     <target name="postservicetarget" description="Post-service deployment target">
         <echo message="Running post-service target for ${serviceName}"/>
@@ -437,16 +663,13 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
     </target>
 </project>
 """)
-            }
         }
+        File(zideBuildDir, "buildlogs").mkdirs()
 
-        val zideHookDir = File(zideResources, "zide_hook")
-        if (!zideHookDir.exists()) {
-            zideHookDir.mkdirs()
-            val hookBuildXml = File(zideHookDir, "build.xml")
-            if (!hookBuildXml.exists()) {
-                val serviceName = result.name
-                hookBuildXml.writeText("""<?xml version="1.0" encoding="UTF-8"?>
+        zideHookDir.mkdirs()
+        val hookBuildXml = File(zideHookDir, "build.xml")
+        if (!hookBuildXml.exists()) {
+            hookBuildXml.writeText("""<?xml version="1.0" encoding="UTF-8"?>
 <project name="zide-hook-${serviceName}" default="clone" basedir=".">
     <target name="clone" description="Hook dispatcher">
         <echo message="Running hook: ${'$'}{target} for ${serviceName}"/>
@@ -463,33 +686,45 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
     </target>
 </project>
 """)
-            }
         }
+        File(zideHookDir, "buildlogs").mkdirs()
     }
 
     private fun runHooksIfAvailable(projectDir: File, deploymentDir: File, serviceName: String, indicator: ProgressIndicator) {
-        val hookBuildXml = File(projectDir, ".zide_resources/zide_hook/build.xml")
-        if (!hookBuildXml.exists()) return
-
         val antHome = com.zoho.dzide.deploysync.AntResolver.resolveAntHome(projectDir.absolutePath, null)
             ?: return
         val antExec = com.zoho.dzide.deploysync.AntResolver.resolveAntExecutable(antHome)
-        val hookBaseDir = File(projectDir, ".zide_resources/zide_hook").absolutePath
         val deploymentPath = File(deploymentDir, "AdventNet/Sas/tomcat").absolutePath
 
-        val hookTargets = listOf(
-            "precreationhook" to "Running pre-creation hook...",
-            "postcreationhook" to "Running post-creation hook...",
-            "zidemodulehook" to "Running zide module hook..."
-        )
+        val zideHookDir = File(projectDir, ".zide_resources/zide_hook")
+        val zideBuildDir = File(projectDir, ".zide_resources/zide_build")
 
-        for ((target, message) in hookTargets) {
-            indicator.text = message
+        // Eclipse runs each hook from both zide_hook/ and zide_build/ directories,
+        // capturing output to output_{hookName}.txt in each directory.
+        data class HookRun(val target: String, val hookName: String, val baseDir: File, val message: String)
+
+        val hookRuns = mutableListOf<HookRun>()
+
+        if (File(zideHookDir, "build.xml").exists()) {
+            hookRuns.add(HookRun("precreationhook", "precreation", zideHookDir, "Running pre-creation hook (zide_hook)..."))
+        }
+        if (File(zideBuildDir, "build.xml").exists()) {
+            hookRuns.add(HookRun("postcreationhook", "postcreation", zideBuildDir, "Running post-creation hook (zide_build)..."))
+        }
+        if (File(zideHookDir, "build.xml").exists()) {
+            hookRuns.add(HookRun("zidemodulehook", "zideoperations", zideHookDir, "Running zide module hook (zide_hook)..."))
+        }
+
+        for (hookRun in hookRuns) {
+            val buildXml = File(hookRun.baseDir, "build.xml")
+            if (!buildXml.exists()) continue
+
+            indicator.text = hookRun.message
             val hookResult = ProcessUtil.executeCapturing(
                 command = com.zoho.dzide.util.ShellUtil.buildShellCommand(
-                    "\"$antExec\"", "-f", "\"${hookBuildXml.absolutePath}\"",
-                    "-Dbasedir=\"$hookBaseDir\"", "clone",
-                    "-Dtarget=$target",
+                    "\"$antExec\"", "-f", "\"${buildXml.absolutePath}\"",
+                    "-Dbasedir=\"${hookRun.baseDir.absolutePath}\"", "clone",
+                    "-Dtarget=${hookRun.target}",
                     "-DREPOSITORY_PATH=${projectDir.absolutePath}",
                     "-DDEPLOYMENT_PATH=$deploymentPath",
                     "-DZIDE.PARENT_SERVICE=$serviceName"
@@ -497,8 +732,20 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
                 workingDir = projectDir.absolutePath,
                 timeoutMs = 300_000
             )
+
+            val outputFile = File(hookRun.baseDir, "output_${hookRun.hookName}.txt")
+            try {
+                val output = buildString {
+                    if (hookResult.stdout.isNotBlank()) appendLine(hookResult.stdout)
+                    if (hookResult.stderr.isNotBlank()) appendLine(hookResult.stderr)
+                }
+                outputFile.writeText(output)
+            } catch (e: Exception) {
+                log.warn("Failed to write hook output to ${outputFile.absolutePath}", e)
+            }
+
             if (hookResult.exitCode != 0) {
-                log.warn("Hook '$target' failed (exit code ${hookResult.exitCode}): ${hookResult.stderr}")
+                log.warn("Hook '${hookRun.target}' failed (exit code ${hookResult.exitCode}): ${hookResult.stderr}")
             }
         }
     }

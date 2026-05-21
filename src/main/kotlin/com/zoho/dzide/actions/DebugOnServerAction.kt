@@ -11,7 +11,10 @@ class DebugOnServerAction : AnAction("Debug", "Start server in debug mode and at
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val server = ServerActionUtil.getSelectedServer(e) ?: return
+        val server = ServerActionUtil.getSelectedServer(e) ?: run {
+            NotificationUtil.error(project, "No Tomcat server configured. Add a server first via ZIDE > Add Tomcat Server.")
+            return
+        }
         val tomcatManager = TomcatManager.getInstance(project)
 
         val debugPort = server.debugPort?.takeIf { it > 0 }

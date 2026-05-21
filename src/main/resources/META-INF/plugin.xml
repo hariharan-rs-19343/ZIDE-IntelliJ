@@ -232,6 +232,39 @@
                 <keyboard-shortcut keymap="$default" first-keystroke="control shift B"/>
             </action>
 
+            <group id="dzide.RunHooksGroup"
+                   text="Run Hooks"
+                   description="Run ZIDE ANT hooks"
+                   popup="true"
+                   icon="AllIcons.Actions.Lightning">
+
+                <action id="dzide.RunAllHooks"
+                        class="com.zoho.dzide.actions.RunHooksAction$RunAllHooks"
+                        text="Run All Hooks"
+                        description="Run all ZIDE hooks (precreation + postcreation + zidemodule)"
+                        icon="AllIcons.Actions.RunAll"/>
+
+                <separator/>
+
+                <action id="dzide.RunPrecreationHook"
+                        class="com.zoho.dzide.actions.RunHooksAction$RunPrecreationHook"
+                        text="Run Precreation Hook"
+                        description="Run precreationhook from zide_hook/"
+                        icon="AllIcons.Actions.Execute"/>
+
+                <action id="dzide.RunPostcreationHook"
+                        class="com.zoho.dzide.actions.RunHooksAction$RunPostcreationHook"
+                        text="Run Postcreation Hook"
+                        description="Run postcreationhook from zide_build/"
+                        icon="AllIcons.Actions.Execute"/>
+
+                <action id="dzide.RunZideModuleHook"
+                        class="com.zoho.dzide.actions.RunHooksAction$RunZideModuleHook"
+                        text="Run ZideModule Hook"
+                        description="Run zidemodulehook from zide_hook/"
+                        icon="AllIcons.Actions.Execute"/>
+            </group>
+
             <action id="dzide.DeploymentProperties"
                     class="com.zoho.dzide.actions.DeploymentPropertiesAction"
                     text="Deployment Properties"
@@ -257,7 +290,7 @@
                         text="Local Build"
                         description="Deploy a local zip file to the server"
                         icon="AllIcons.Actions.Upload">
-                    <keyboard-shortcut keymap="$default" first-keystroke="control shift U"/>
+                    <keyboard-shortcut keymap="$default" first-keystroke="meta shift U"/>
                 </action>
             </group>
 

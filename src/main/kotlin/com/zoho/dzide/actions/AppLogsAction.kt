@@ -6,8 +6,10 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.zoho.dzide.tomcat.TomcatManager
+import com.zoho.dzide.tomcat.TomcatServerProvider
 import com.zoho.dzide.util.ConsoleUtil
 import com.zoho.dzide.util.NotificationUtil
+import com.zoho.dzide.zide.ZideConfigParser
 import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.nio.file.Path
@@ -23,8 +25,13 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val server = ServerActionUtil.getSelectedServer(e) ?: return
         val tomcatManager = TomcatManager.getInstance(project)
+
+        val logsDir = resolveLogsDir(e)
+        if (logsDir == null || !logsDir.exists()) {
+            NotificationUtil.warn(project, "Application log file not available.")
+            return
+        }
 
         tomcatManager.ensureToolWindow {
             val console = tomcatManager.appLogsConsoleView ?: return@ensureToolWindow
@@ -35,12 +42,6 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
                 toolWindow.contentManager.setSelectedContent(appLogsContent)
             }
 
-            val logsDir = Path.of(server.path).parent.resolve("logs")
-            if (!logsDir.exists()) {
-                NotificationUtil.error(project, "Logs directory not found: $logsDir")
-                return@ensureToolWindow
-            }
-
             val logFile = Files.list(logsDir).use { stream ->
                 stream.filter { it.isRegularFile() && it.name.endsWith("application0.txt") }
                     .sorted(Comparator.comparingLong<Path> { Files.getLastModifiedTime(it).toMillis() }.reversed())
@@ -49,7 +50,9 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
             }
 
             if (logFile == null) {
-                NotificationUtil.error(project, "No *application0.txt log files found in $logsDir")
+                console.clear()
+                console.print("Application log file not available.\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
+                console.print("No *application0.txt files found in: $logsDir\n", ConsoleViewContentType.NORMAL_OUTPUT)
                 return@ensureToolWindow
             }
 
@@ -74,6 +77,28 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
                 }
             }
         }
+    }
+
+    private fun resolveLogsDir(e: AnActionEvent): Path? {
+        val project = e.project ?: return null
+
+        val serverProvider = TomcatServerProvider.getInstance(project)
+        val servers = serverProvider.getServers()
+        if (servers.isNotEmpty()) {
+            val server = servers.first()
+            val logsDir = Path.of(server.path).parent.resolve("logs")
+            if (logsDir.exists()) return logsDir
+        }
+
+        val projectPath = project.basePath ?: return null
+        val zideConfig = ZideConfigParser.readZideConfig(projectPath)
+        val deploymentFolder = zideConfig?.service?.properties?.get("ZIDE.DEPLOYMENT_FOLDER")
+        if (deploymentFolder != null) {
+            val logsDir = Path.of(deploymentFolder, "AdventNet", "Sas", "logs")
+            if (logsDir.exists()) return logsDir
+        }
+
+        return null
     }
 
     private fun readTailLines(file: Path, maxLines: Int): List<String> {

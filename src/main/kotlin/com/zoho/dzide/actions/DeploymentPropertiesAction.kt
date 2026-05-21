@@ -2,6 +2,7 @@ package com.zoho.dzide.actions
 
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.zoho.dzide.tomcat.TomcatServerProvider
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.PortUtil
 import com.zoho.dzide.zide.DeploymentPropertiesDialog
@@ -11,7 +12,6 @@ class DeploymentPropertiesAction : AnAction("Deployment Properties", "Edit ZIDE 
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val server = ServerActionUtil.getSelectedServer(e) ?: return
 
         val projectPath = project.basePath ?: return
         val zideConfig = ZideConfigParser.readZideConfig(projectPath)
@@ -26,7 +26,11 @@ class DeploymentPropertiesAction : AnAction("Deployment Properties", "Edit ZIDE 
         }
 
         val serviceKey = properties.serviceKey
-        val serverRunning = PortUtil.isPortInUse(server.port)
+
+        val serverProvider = TomcatServerProvider.getInstance(project)
+        val servers = serverProvider.getServers()
+        val serverRunning = servers.any { PortUtil.isPortInUse(it.port) }
+
         val dialog = DeploymentPropertiesDialog(project, serviceKey, properties.properties, readOnly = serverRunning)
 
         if (dialog.showAndGet() && !serverRunning) {
