@@ -1,0 +1,108 @@
+---
+description: Quick-reference knowledge base for the ZIDE IntelliJ plugin project. Consult before re-reading source files.
+alwaysApply: true
+---
+
+# ZIDE Plugin Knowledge Map
+
+## Project Identity
+- Plugin ID: `com.zoho.dzide`
+- Current Version: 0.0.5
+- Language: Kotlin 1.9.25, JVM 17
+- Build: Gradle 8.12 (Kotlin DSL), IntelliJ Platform Plugin 2.5.0
+- Target IDE: IntelliJ IDEA 2024.1.7+ (Community or Ultimate)
+- Build command: `./gradlew clean buildPlugin`
+- Output zip: `build/distributions/zide-intelliJ-plugin-{version}.zip`
+- Version defined in: `gradle.properties` (`pluginVersion`)
+
+## Package Structure (`src/main/kotlin/com/zoho/dzide/`)
+- `DzidePlugin.kt` — ProjectActivity startup (logs init, checks ~/.wgetrc)
+- `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh)
+- `tomcat/` — TomcatManager (lifecycle), TomcatServerProvider (CRUD)
+- `deploysync/` — DeploySyncSaveListener, ResourceSyncManager (ANT hooks, class copy, hot-swap), AntResolver
+- `zide/` — ZideConfigParser, DeploymentConfigPatcher, ZideSetupWizard, DeploymentPropertiesDialog
+- `parser/` — ModuleZidePropsParser, PathResolver
+- `model/` — TomcatServer, ProjectServerMapping, ZideModels, ParserModels
+- `persistence/` — TomcatServerState (dzide/tomcat-servers.xml), ZideCacheState (dzide/eclipse-zide.xml)
+- `runconfig/` — TomcatConfigurationType, TomcatRunConfiguration, TomcatRunState, Editor, Options, Factory
+- `toolwindow/` — TomcatToolWindowFactory, TomcatToolbar, TomcatTreeModel, TomcatTreeCellRenderer, TomcatTreePopupHandler
+- `util/` — ProcessUtil, ShellUtil, PortUtil, NotificationUtil, ConsoleUtil
+- `settings/` — ZideSettingsState, ZideSettingsConfigurable, CmToolConfigurable, WgetConfigurable, GitConfigurable, ZohoRepoConfigurable, PasswordFieldWithToggle
+
+## Key Models
+- `TomcatServer` — id, name, path, status, port, debugPort, zide* fields (serviceKey, folderPath, propertiesPath, launchVmArguments, hookTasksRaw, autoResourceCopyRaw, repositoryModuleDir, deployType, runtimeProperties, buildXmlPath, buildBaseDir, antHomeResolvedPath)
+- `ProjectServerMapping` — projectPath, serverId, contextPath, warFilePath
+
+## ZIDE Configuration Files (in project)
+- `.zide_resources/service.xml` — Service definitions (DEPLOYMENT_FOLDER, PARENT_SERVICE, TOMCAT_VERSION, SERVICE_KEY, REPOSITORY_MODULE_DIR, DEPLOY_TYPE, HTTP_PORT)
+- `.zide_resources/zide_properties.xml` — Environment props (HOST_NAME, USER_MAIL, SCHEMA_NAME, IAM_SERVER, HTTP_PORT, HTTPS_PORT, IAM_SERVICENAME, DB_USER, DB_NAME, DB_PASS)
+- `.zide_resources/repository.properties` — `repositorypath` key
+- `.zide_resources/zide_build/build.xml` — ANT script for deploy-sync hooks + post-creation hook
+- `.zide_resources/zide_hook/build.xml` — ANT script for pre-creation + zide module hooks
+
+## Server Lifecycle
+- Start: patches configs → pre-start setup (postzidedeploy.sh, server.xml sync) → `sh catalina.sh run` with CATALINA_OPTS
+- Debug: same as start but `sh catalina.sh jpda run` with JPDA_ADDRESS=*:port, then auto-attaches RemoteConfiguration
+- Stop: destroyProcess → fallback catalina.sh stop -force → lsof + kill -9
+- Dispose: on IDE quit, all processes destroyed + force-kill by port
+
+## Deploy Sync (on file save)
+- .java → compile → find .class in out/production/, bin/, target/classes/, build/classes/ → copy to WEB-INF/classes/ → JDWP hot-swap
+- Other files → match hook task mappings → run ANT targets → match auto-copy mappings → copy files
+
+## Update Deployment Flow
+1. Stop server if running
+2. Copy zip to deployment folder
+3. Extract zip
+4. Unzip ROOT.war as {parentService} in webapps/
+5. Delete *.war files
+6. Run ANT hooks (precreationhook, postservicetarget, zidemodulehook)
+7. Patch deployment configs (server.xml, web.xml, persistence, security)
+
+## ANT Script Detection (Update Deployment)
+- ANT Home: persisted path → ANT_HOME env → ~/.zshrc/~/.bashrc/~/.bash_profile scan
+- Pre-creation hook: `{repo}/.zide_resources/zide_hook/build.xml` target=`precreationhook`
+- Post-creation hook: `{repo}/.zide_resources/zide_build/build.xml` target=`postservicetarget`
+- Zide module hook: `{repo}/.zide_resources/zide_hook/build.xml` target=`zidemodulehook`
+- ANT command: `ant -f {build.xml} -Dbasedir={baseDir} clone -Dtarget={target} -DREPOSITORY_PATH=... -DDEPLOYMENT_PATH=... -DZIDE.PARENT_SERVICE=...`
+
+## ANT Script Detection (Deploy Sync / Build)
+- Build action: runs `ant` in `{project}/build/` directory
+- Deploy-sync hooks: uses `{repo}/.zide_resources/zide_build/build.xml` with targets from Zide.properties `hooks.resourcemodify.all.calltasks`
+
+## Deployment Config Patching
+- server.xml: injects Context element, sets shutdown port, deployOnStartup=false
+- web.xml: adds JSP servlet + mapping for dev
+- persistence-configurations.xml: DBName=postgres, StartDBServer=false
+- security-properties.xml: IAM server, service name, logout URL
+
+## Settings (Settings > Tools > Zide)
+- CMTool: Auth Token (PasswordFieldWithToggle, stored in ZideSettingsState)
+- Wget Configuration: Username + Password (PasswordSafe), writes ~/.wgetrc on Apply
+- Git: Path (browse + auto-detect) + Username + Password (PasswordSafe)
+- Zoho Repository: Username + Password (PasswordSafe)
+- Application-level persistence in `dzide-settings.xml`
+- Passwords encrypted via IntelliJ PasswordSafe
+
+## Keyboard Shortcuts
+- Run: Ctrl+Shift+I
+- Debug: Ctrl+Shift+D
+- Stop: Ctrl+Shift+.
+- Build: Ctrl+Shift+B
+- Update Deployment: Ctrl+Shift+U
+- App Logs: Ctrl+Shift+L
+
+## Tool Window: SAS-ZIDE (bottom)
+- Tabs: Servers (tree), Output (console), App Logs (console)
+- Toolbar: Add, Refresh, Stop, Restart (Servers tab); Refresh (App Logs tab)
+
+## Important Implementation Details
+- TomcatManager implements Disposable (kills servers on IDE quit)
+- serverProcesses uses ConcurrentHashMap for thread safety
+- JPDA_ADDRESS format: `*:port` (JDK 9+ compatible)
+- DebugOnServerAction sets module on RemoteConfiguration for breakpoint resolution
+- AppLogsAction reads only last 5000 lines (tail-read via RandomAccessFile)
+- ServerActionUtil uses Messages.showChooseDialog (modal, synchronous)
+- ProcessUtil.executeStreaming delivers raw text chunks (don't append \n)
+- ZideConfigParser uses mtime-based in-memory caching
+- ~/.wgetrc checked on startup; missing → balloon warning

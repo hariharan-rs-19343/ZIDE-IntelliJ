@@ -203,7 +203,7 @@ object ZideConfigParser {
 
         var content = propertiesXmlPath.readText()
         for ((name, value) in updates) {
-            val regex = Regex("""(<property\s+name="${Regex.escape(name)}"\s+value=")[^"]*("/)""")
+            val regex = Regex("""(<property\s+name="${Regex.escape(name)}"\s+value=")[^"]*("\s*/>)""")
             content = regex.replace(content, "$1${Regex.escapeReplacement(value)}$2")
         }
         propertiesXmlPath.writeText(content)

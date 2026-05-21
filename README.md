@@ -78,6 +78,6 @@ Available under **ZIDE** in the main menu bar:
 | Stop | `Ctrl+Shift+.` | Stop the running Tomcat process |
 | Refresh | | Refresh all server statuses |
 | Build | `Ctrl+Shift+B` | Run ANT build |
-| Update Deployment | | Deploy zip to server |
+| Update Deployment | `Ctrl+Shift+U` | Deploy zip to server |
 | Deployment Properties | | Edit ZIDE deployment properties |
-| App Logs | | View application logs |
+| App Logs | `Ctrl+Shift+L` | View application logs |
