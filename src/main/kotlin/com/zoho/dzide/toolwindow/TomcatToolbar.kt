@@ -13,6 +13,7 @@ object TomcatToolbar {
         val am = ActionManager.getInstance()
         val group = DefaultActionGroup()
         group.add(am.getAction("dzide.AddServer"))
+        group.add(am.getAction("dzide.RemoveServer"))
         group.add(am.getAction("dzide.RefreshServers"))
         group.addSeparator()
         group.add(am.getAction("dzide.StopServer"))

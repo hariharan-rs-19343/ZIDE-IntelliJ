@@ -103,7 +103,7 @@
         <!-- Tool window -->
         <toolWindow id="SAS-ZIDE"
                     anchor="bottom"
-                    icon="AllIcons.Actions.Execute"
+                    icon="/icons/zide-toolwindow.svg"
                     factoryClass="com.zoho.dzide.toolwindow.TomcatToolWindowFactory"/>
 
         <!-- Run configuration -->
@@ -117,6 +117,9 @@
         <!-- File save listener for deploy sync -->
         <fileDocumentManagerListener
                 implementation="com.zoho.dzide.deploysync.DeploySyncSaveListener"/>
+
+        <!-- ZIDE Module Builder for New Project dialog -->
+        <moduleBuilder builderClass="com.zoho.dzide.newproject.ZideModuleBuilder" order="first"/>
 
         <!-- Application-level settings persistence -->
         <applicationService serviceImplementation="com.zoho.dzide.settings.ZideSettingsState"/>
@@ -160,6 +163,20 @@
                description="ZIDE Tomcat Server Management"
                popup="true">
             <add-to-group group-id="MainMenu" anchor="before" relative-to-action="HelpMenu"/>
+
+            <action id="dzide.NewProject"
+                    class="com.zoho.dzide.newproject.ZideNewProjectAction"
+                    text="New Project"
+                    description="Create a new ZIDE project"
+                    icon="AllIcons.Actions.NewFolder"/>
+
+            <action id="dzide.UninstallProject"
+                    class="com.zoho.dzide.actions.UninstallProjectAction"
+                    text="Uninstall Project"
+                    description="Remove ZIDE project, deployment folder, and server configuration"
+                    icon="AllIcons.Actions.GC"/>
+
+            <separator/>
 
             <action id="dzide.AddServer"
                     class="com.zoho.dzide.actions.AddServerAction"
@@ -254,6 +271,12 @@
         </group>
 
         <!-- Toolbar-only actions (not in ZIDE menu) -->
+        <action id="dzide.RemoveServer"
+                class="com.zoho.dzide.actions.RemoveServerAction"
+                text="Remove Server"
+                description="Remove this Tomcat server"
+                icon="AllIcons.General.Remove"/>
+
         <action id="dzide.RestartServer"
                 class="com.zoho.dzide.actions.RestartServerAction"
                 text="Restart"

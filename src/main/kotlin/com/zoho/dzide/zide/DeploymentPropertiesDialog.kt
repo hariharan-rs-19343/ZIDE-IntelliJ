@@ -23,7 +23,6 @@ class DeploymentPropertiesDialog(
     private val fields = listOf(
         FieldDef("ZIDE.HOST_NAME", "Host Name"),
         FieldDef("ZIDE.USER_MAIL", "User EMail"),
-        FieldDef("ZIDE.SCHEMA_NAME", "Schema Name"),
         FieldDef("ZIDE.IAM_SERVER", "IAM Server"),
         FieldDef("ZIDE.HTTP_PORT", "Http Port"),
         FieldDef("ZIDE.HTTPS_PORT", "Https Port"),
