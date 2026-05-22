@@ -3,12 +3,20 @@
     <name>ZIDE</name>
     <vendor>Zoho</vendor>
     <description><![CDATA[
-        <p>ZIDE brings Zoho's server development workflow to IntelliJ IDEA — manage Tomcat servers, deploy, debug, and iterate on code without leaving the IDE.</p>
+        <p>ZIDE brings Zoho's internal ZIDE development workflow to IntelliJ IDEA — create projects from CMTool, manage Tomcat servers, deploy, debug, and iterate on code without leaving the IDE.</p>
+        <h3>New Project Creation</h3>
+        <ul>
+            <li>Create ZIDE projects from the New Project wizard or ZIDE menu</li>
+            <li>CMTool integration — browse and select services with auto-populated repository URLs</li>
+            <li>Git clone, build download (remote/local), WAR extraction, ANT hooks, and config patching in one flow</li>
+            <li>Auto-scaffolds .zide_resources/ with service.xml, zide_properties.xml, and build structures</li>
+        </ul>
         <h3>Server Management</h3>
         <ul>
             <li>Add, edit, and remove Tomcat server configurations from a dedicated tool window</li>
             <li>Start, stop, and restart servers with real-time log streaming</li>
             <li>Run and debug Java projects on Tomcat with JPDA auto-attach</li>
+            <li>Servers automatically killed when IntelliJ quits or restarts</li>
         </ul>
         <h3>Deploy Sync</h3>
         <ul>
@@ -16,31 +24,44 @@
             <li>ANT hook tasks and auto-resource copy for JSP, JS, CSS, and XML changes</li>
             <li>Compiled class files synced to deployment WEB-INF/classes/</li>
         </ul>
-        <h3>ZIDE Integration</h3>
+        <h3>Deployment</h3>
         <ul>
-            <li>Auto-configure from Eclipse ZIDE projects (.zide_resources/)</li>
+            <li>Update Deployment — Custom Build (remote URL download) or Local Build (zip file)</li>
+            <li>Deployment Properties — edit Host Name, IAM Server, ports, database configuration</li>
             <li>Deployment config patching — server.xml, web.xml, persistence, and security configs</li>
-            <li>Update Deployment — deploy zip archives to the ZIDE deployment folder</li>
+        </ul>
+        <h3>Settings</h3>
+        <ul>
+            <li>CMTool Auth Token, Wget credentials, Git path, and Zoho Repository configuration</li>
+            <li>Password visibility toggle and git auto-detect</li>
+            <li>Automatic ~/.wgetrc management</li>
         </ul>
         <h3>Productivity</h3>
         <ul>
-            <li>ZIDE menu with keyboard shortcuts for Run, Debug, Stop, and Build</li>
+            <li>ZIDE menu with keyboard shortcuts for all actions</li>
             <li>App Logs viewer with color-coded ERROR/WARN highlighting</li>
+            <li>ANT build integration</li>
         </ul>
     ]]></description>
 
     <change-notes><![CDATA[
         <b>0.0.5</b>
         <ul>
-            <li>Deployment Properties editor — view and edit ZIDE properties (Host Name, IAM Server, ports, etc.) from the ZIDE menu; read-only mode when server is running</li>
+            <li>New Project Wizard — create ZIDE projects from File > New > Project or ZIDE menu with CMTool service selection, git clone, build download, and full deployment setup</li>
+            <li>CMTool API integration — fetches products list with PRIVATE-TOKEN auth, auto-populates repository URLs</li>
+            <li>Build Type selection — Remote Build (download via wget) or Local Build (local zip file) with progress indicator</li>
+            <li>Custom Build action — download and deploy from a remote URL with progress bar in status bar</li>
+            <li>Update Deployment submenu — split into Custom Build (Ctrl+Shift+Alt+U) and Local Build (Ctrl+Shift+U)</li>
+            <li>Deployment Properties editor — view and edit ZIDE properties with Database Configuration panel (MySQL/PostgreSQL, hostname, credentials, schema); read-only when server is running</li>
+            <li>Settings panel (Settings > Tools > Zide) — CMTool, Wget, Git, and Zoho Repository configuration with password visibility toggle</li>
+            <li>Auto-detect git path and ~/.wgetrc management with startup check</li>
+            <li>Tomcat version auto-detection from deployed catalina.jar</li>
             <li>Kill Tomcat servers on IDE quit/restart — servers are now properly stopped when IntelliJ closes</li>
             <li>Breakpoints fix — debug sessions now set the module classpath so breakpoints resolve to source files</li>
-            <li>JPDA address uses *:port format for JDK 9+ compatibility</li>
-            <li>Thread-safe server process tracking with ConcurrentHashMap</li>
-            <li>Server picker fix — multi-server selection now uses a modal dialog instead of async popup</li>
+            <li>Actions work without pre-configured server — Build, App Logs, Deployment Properties, and Update Deployment fall back to .zide_resources</li>
             <li>App Logs tail-read — only loads last 5000 lines to prevent OOM on large log files</li>
-            <li>Build output fix — ANT console output no longer shows extra empty lines</li>
-            <li>Code cleanup — removed stale files, dead code, and extracted shared utilities</li>
+            <li>Thread-safe server process tracking, JPDA *:port format for JDK 9+</li>
+            <li>Plugin branding — custom ZIDE icon for plugin and tool window</li>
         </ul>
         <b>0.0.4</b>
         <ul>

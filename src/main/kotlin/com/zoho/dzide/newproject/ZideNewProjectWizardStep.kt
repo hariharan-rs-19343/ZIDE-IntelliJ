@@ -41,7 +41,7 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
             row("JDK:") {
                 comboBox(jdkModel)
                     .bindItem(jdkProperty)
-                    .columns(COLUMNS_MEDIUM)
+                    .align(AlignX.FILL)
             }
 
             row("Service:") {
