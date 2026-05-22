@@ -1,8 +1,10 @@
 package com.zoho.dzide
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
+import com.zoho.dzide.update.PluginUpdateChecker
 import com.zoho.dzide.util.NotificationUtil
 import java.io.File
 
@@ -19,6 +21,17 @@ class DzidePlugin : ProjectActivity {
                 project,
                 "~/.wgetrc file is missing. Configure Wget credentials in Settings > Tools > Zide > Wget Configuration."
             )
+        }
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val updateInfo = PluginUpdateChecker.checkForUpdate()
+            if (updateInfo != null) {
+                ApplicationManager.getApplication().invokeLater {
+                    if (!project.isDisposed) {
+                        PluginUpdateChecker.showUpdateNotification(project, updateInfo)
+                    }
+                }
+            }
         }
     }
 }

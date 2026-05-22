@@ -322,6 +322,14 @@
                     icon="AllIcons.Debugger.Console">
                 <keyboard-shortcut keymap="$default" first-keystroke="control shift L"/>
             </action>
+
+            <separator/>
+
+            <action id="dzide.CheckForUpdate"
+                    class="com.zoho.dzide.update.CheckForUpdateAction"
+                    text="Check for Updates"
+                    description="Check if a newer version of ZIDE is available"
+                    icon="AllIcons.Ide.Notification.PluginUpdate"/>
         </group>
 
         <!-- Toolbar-only actions (not in ZIDE menu) -->
