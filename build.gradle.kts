@@ -41,13 +41,15 @@ intellijPlatform {
             name = "Zoho"
         }
         description = """
-            ZIDE — Tomcat server management and ZIDE auto-configuration for IntelliJ IDEA.
+            ZIDE — Zoho's internal development workflow for IntelliJ IDEA. Create projects, manage Tomcat servers, deploy, debug, and iterate on code.
             <ul>
-                <li>Add / Edit / Remove Tomcat servers from a dedicated tool window</li>
-                <li>Start / Stop servers with real-time log output</li>
-                <li>Run and Debug Java projects on Tomcat with JPDA support</li>
-                <li>Auto-configure from Eclipse ZIDE projects (.zide_resources/)</li>
-                <li>Deploy-sync on save: ANT hooks and compiled class file copy</li>
+                <li>New Project Wizard — create ZIDE projects with CMTool service selection, git clone, and build deployment</li>
+                <li>Server Management — Add, run, debug, stop, and restart Tomcat servers with JPDA auto-attach</li>
+                <li>Update Deployment — Custom Build (remote URL) or Local Build (zip file) with ANT hooks</li>
+                <li>Deploy Sync on Save — auto-compile, hot-swap, ANT hooks, and resource copy on file save</li>
+                <li>Deployment Properties — edit Host Name, IAM Server, ports, and database configuration</li>
+                <li>Settings — CMTool Auth Token, Wget credentials, Git path, and Zoho Repository</li>
+                <li>Auto-Update — checks GitHub releases for newer versions on startup</li>
             </ul>
         """.trimIndent()
     }
