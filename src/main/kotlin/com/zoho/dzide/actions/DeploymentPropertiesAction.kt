@@ -14,6 +14,7 @@ class DeploymentPropertiesAction : AnAction("Deployment Properties", "Edit ZIDE 
         val project = e.project ?: return
 
         val projectPath = project.basePath ?: return
+        ZideConfigParser.clearCache(projectPath)
         val zideConfig = ZideConfigParser.readZideConfig(projectPath)
         if (zideConfig == null) {
             NotificationUtil.error(project, "ZIDE configuration not found. Ensure .zide_resources/ exists with service.xml and zide_properties.xml.")

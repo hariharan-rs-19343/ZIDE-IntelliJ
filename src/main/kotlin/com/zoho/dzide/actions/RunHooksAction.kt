@@ -17,6 +17,7 @@ import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.util.ShellUtil
 import com.zoho.dzide.zide.ZideConfigParser
 import java.io.File
+import java.net.InetAddress
 import java.nio.file.Path
 
 object RunHooksAction {
@@ -64,6 +65,75 @@ object RunHooksAction {
         val antExec: String
     )
 
+    private val REQUIRED_PROPERTIES = mapOf(
+        "ZIDE.HOST_NAME" to { resolveHostNameWithDomain() },
+        "ZIDE.USER_MAIL" to { "${System.getProperty("user.name", "")}@zohocorp.com" },
+        "ZIDE.IAM_SERVER" to { "https://accounts.csez.zohocorpin.com" },
+        "ZIDE.HTTP_PORT" to { "8080" },
+        "ZIDE.HTTPS_PORT" to { "8443" },
+        "ZIDE.IAM_SERVICENAME" to { "" },
+        "ZIDE.USER_NAME" to { System.getProperty("user.name", "") },
+        "ZIDE.MACHINE_IP" to { resolveHostNameWithDomain() },
+        "ZIDE_DB_TYPE" to { "PGSQL" },
+        "ZIDE_DB_HOST" to { "localhost" },
+        "ZIDE_DB_USER" to { "root" },
+        "ZIDE_DB_PASS" to { "" },
+        "ZIDE_DB_NAME" to { "" },
+        "ZIDE.SCHEMA_NAME" to { "jbossdb" }
+    )
+
+    private fun resolveHostNameWithDomain(): String {
+        val csezDomain = ".csez.zohocorpin.com"
+        val hostname = try {
+            InetAddress.getLocalHost().hostName
+        } catch (_: Exception) {
+            "localhost"
+        }
+        return if (hostname.endsWith(csezDomain)) hostname else "$hostname$csezDomain"
+    }
+
+    private fun ensureRequiredProperties(projectPath: String, console: ConsoleView, project: Project): String? {
+        ZideConfigParser.clearCache(projectPath)
+        val zideConfig = ZideConfigParser.readZideConfig(projectPath)
+        val properties = zideConfig?.properties
+        val serviceKey = properties?.serviceKey
+
+        if (serviceKey == null) {
+            ConsoleUtil.print(console, project,
+                "  Warning: Could not read zide_properties.xml, skipping property validation.\n",
+                ConsoleViewContentType.LOG_WARNING_OUTPUT)
+            return null
+        }
+
+        val existingProps = properties.properties
+        val missing = mutableMapOf<String, String>()
+
+        for ((key, defaultProvider) in REQUIRED_PROPERTIES) {
+            if (!existingProps.containsKey(key)) {
+                val defaultValue = if (key == "ZIDE.IAM_SERVICENAME") serviceKey else defaultProvider()
+                missing[key] = defaultValue
+            }
+        }
+
+        if (missing.isNotEmpty()) {
+            ConsoleUtil.print(console, project,
+                "  Validating zide_properties.xml: inserting ${missing.size} missing key(s)...\n",
+                ConsoleViewContentType.SYSTEM_OUTPUT)
+            for ((key, value) in missing) {
+                val display = if (value.isBlank()) "(empty)" else value
+                ConsoleUtil.print(console, project,
+                    "    + $key = $display\n",
+                    ConsoleViewContentType.SYSTEM_OUTPUT)
+            }
+            ZideConfigParser.writePropertiesToXml(projectPath, serviceKey, missing)
+            ConsoleUtil.print(console, project,
+                "  zide_properties.xml updated.\n\n",
+                ConsoleViewContentType.SYSTEM_OUTPUT)
+        }
+
+        return serviceKey
+    }
+
     private fun runHooks(project: Project, hooks: List<HookDef>, taskTitle: String) {
         val ctx = resolveContext(project) ?: return
 
@@ -74,6 +144,10 @@ object RunHooksAction {
             ProgressManager.getInstance().run(object : Task.Backgroundable(project, taskTitle, true) {
                 override fun run(indicator: ProgressIndicator) {
                     ConsoleUtil.print(console, project, "\n=== $taskTitle ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+
+                    indicator.text = "Validating properties..."
+                    indicator.fraction = 0.0
+                    ensureRequiredProperties(ctx.projectPath, console, project)
 
                     for ((i, hook) in hooks.withIndex()) {
                         indicator.text = "Running ${hook.label}..."

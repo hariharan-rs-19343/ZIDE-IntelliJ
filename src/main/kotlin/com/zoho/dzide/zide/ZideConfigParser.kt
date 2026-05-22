@@ -96,13 +96,12 @@ object ZideConfigParser {
             for (i in 0 until serviceNodes.length) {
                 val element = serviceNodes.item(i) as? Element ?: continue
                 val key = element.getAttribute("key") ?: continue
-                if (serviceKey == null || key == serviceKey) {
+                if (serviceKey == null || key.equals(serviceKey, ignoreCase = true)) {
                     val properties = extractPropertiesFromElement(element)
                     return ZidePropertiesResult(key, properties)
                 }
             }
         } catch (_: Exception) {
-            // Fall back to regex
             return parsePropertiesXmlRegex(xmlContent, serviceKey)
         }
         return null
@@ -113,7 +112,7 @@ object ZideConfigParser {
         val propertyRegex = Regex("""<property\s+name="([^"]+)"\s+value="([^"]*)"""")
         for (match in serviceRegex.findAll(xmlContent)) {
             val key = match.groupValues[1]
-            if (serviceKey == null || key == serviceKey) {
+            if (serviceKey == null || key.equals(serviceKey, ignoreCase = true)) {
                 val content = match.groupValues[2]
                 val properties = mutableMapOf<String, String>()
                 for (propMatch in propertyRegex.findAll(content)) {
@@ -197,15 +196,43 @@ object ZideConfigParser {
                 zideResourcesPath.resolve("zide_properties.xml").exists()
     }
 
+    fun clearCache(projectPath: String? = null) {
+        if (projectPath != null) {
+            inMemoryCache.remove(projectPath)
+        } else {
+            inMemoryCache.clear()
+        }
+    }
+
     fun writePropertiesToXml(projectPath: String, serviceKey: String, updates: Map<String, String>) {
         val propertiesXmlPath = Path.of(projectPath, ".zide_resources", "zide_properties.xml")
         if (!propertiesXmlPath.exists()) return
 
         var content = propertiesXmlPath.readText()
+        val missingKeys = mutableListOf<Pair<String, String>>()
+
         for ((name, value) in updates) {
             val regex = Regex("""(<property\s+name="${Regex.escape(name)}"\s+value=")[^"]*("\s*/>)""")
-            content = regex.replace(content, "$1${Regex.escapeReplacement(value)}$2")
+            if (regex.containsMatchIn(content)) {
+                content = regex.replace(content, "$1${Regex.escapeReplacement(value)}$2")
+            } else {
+                missingKeys.add(name to value)
+            }
         }
+
+        if (missingKeys.isNotEmpty()) {
+            val serviceCloseTag = "</service>"
+            val insertionPoint = content.lastIndexOf(serviceCloseTag)
+            if (insertionPoint >= 0) {
+                val newProperties = missingKeys.joinToString("\n") { (name, value) ->
+                    """    <property name="$name" value="${value.replace("\"", "&quot;")}"/>"""
+                }
+                content = content.substring(0, insertionPoint) +
+                        newProperties + "\n" +
+                        content.substring(insertionPoint)
+            }
+        }
+
         propertiesXmlPath.writeText(content)
         inMemoryCache.remove(projectPath)
     }

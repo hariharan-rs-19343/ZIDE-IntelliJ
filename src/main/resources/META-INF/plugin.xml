@@ -118,8 +118,8 @@
         <fileDocumentManagerListener
                 implementation="com.zoho.dzide.deploysync.DeploySyncSaveListener"/>
 
-        <!-- ZIDE Module Builder for New Project dialog -->
-        <moduleBuilder builderClass="com.zoho.dzide.newproject.ZideModuleBuilder" order="first"/>
+        <!-- ZIDE New Project Wizard (modern sidebar entry) -->
+        <newProjectWizard.generator implementation="com.zoho.dzide.newproject.ZideNewProjectWizard"/>
 
         <!-- Application-level settings persistence -->
         <applicationService serviceImplementation="com.zoho.dzide.settings.ZideSettingsState"/>

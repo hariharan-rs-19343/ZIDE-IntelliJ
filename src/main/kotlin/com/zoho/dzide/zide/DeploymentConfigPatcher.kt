@@ -1,6 +1,5 @@
 package com.zoho.dzide.zide
 
-import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.readText
@@ -9,68 +8,51 @@ import kotlin.io.path.writeText
 /**
  * Patches deployment config files to replicate what Eclipse ZIDE does during server setup.
  *
- * Eclipse's WTP server adapter and ZIDE plugin modify several config files that the ANT hooks
- * do not cover. This class handles those modifications:
- *
- * 1. server.xml — Injects a <Context> element so Tomcat deploys the webapp at root path
- * 2. persistence-configurations.xml — Sets DBName and StartDBServer
- * 3. security-properties.xml — Sets IAM server, service name, logout page with hostname
+ * Eclipse uses pgsql_replace.xml / mysql_replace.xml (from the zide config repo) to patch:
+ * 1. configuration.properties — DB driver, URL, port, vendor, credentials, schema
+ * 2. persistence-configurations.xml — DBName, DSAdapter, StartDBServer
+ * 3. security-properties.xml — IAM server, service name, logout page
+ * 4. server.xml — Context element, shutdown port
+ * 5. web.xml — JSP servlet for dynamic compilation
  */
 object DeploymentConfigPatcher {
 
     data class PatchContext(
-        val deploymentFolder: String,   // e.g. /Users/.../deployment/zharehub
-        val parentService: String,      // e.g. zharehub
-        val iamServer: String?,         // e.g. https://accounts.csez.zohocorpin.com
-        val iamServiceName: String?,    // e.g. ZhareHub
-        val hostName: String?,          // e.g. hari-19343.csez.zohocorpin.com
-        val httpsPort: String?,         // e.g. 8443
-        val dbName: String?,            // e.g. zharehub (from ZIDE_DB_NAME)
-        val schemaName: String?         // e.g. jbossdb (from ZIDE.SCHEMA_NAME)
-    )
+        val deploymentFolder: String,
+        val parentService: String,
+        val iamServer: String?,
+        val iamServiceName: String?,
+        val hostName: String?,
+        val httpsPort: String?,
+        val dbType: String?,
+        val dbName: String?,
+        val dbUser: String?,
+        val dbPass: String?,
+        val dbHost: String?,
+        val schemaName: String?
+    ) {
+        val isPgsql: Boolean get() = dbType?.uppercase() == "PGSQL"
+    }
 
     data class PatchResult(
         val serverXmlPatched: Boolean = false,
         val webXmlPatched: Boolean = false,
         val persistencePatched: Boolean = false,
         val securityPatched: Boolean = false,
+        val configPropertiesPatched: Boolean = false,
         val errors: List<String> = emptyList()
     )
 
     fun patchAll(ctx: PatchContext): PatchResult {
         val errors = mutableListOf<String>()
-        val serverXmlOk = try {
-            patchServerXml(ctx)
-        } catch (e: Exception) {
-            errors.add("server.xml: ${e.message}")
-            false
-        }
-        val webXmlOk = try {
-            patchWebXml(ctx)
-        } catch (e: Exception) {
-            errors.add("web.xml: ${e.message}")
-            false
-        }
-        val persistenceOk = try {
-            patchPersistenceConfig(ctx)
-        } catch (e: Exception) {
-            errors.add("persistence-configurations.xml: ${e.message}")
-            false
-        }
-        val securityOk = try {
-            patchSecurityProperties(ctx)
-        } catch (e: Exception) {
-            errors.add("security-properties.xml: ${e.message}")
-            false
-        }
-        return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, errors)
+        val serverXmlOk = try { patchServerXml(ctx) } catch (e: Exception) { errors.add("server.xml: ${e.message}"); false }
+        val webXmlOk = try { patchWebXml(ctx) } catch (e: Exception) { errors.add("web.xml: ${e.message}"); false }
+        val persistenceOk = try { patchPersistenceConfig(ctx) } catch (e: Exception) { errors.add("persistence-configurations.xml: ${e.message}"); false }
+        val securityOk = try { patchSecurityProperties(ctx) } catch (e: Exception) { errors.add("security-properties.xml: ${e.message}"); false }
+        val configPropsOk = try { patchConfigurationProperties(ctx) } catch (e: Exception) { errors.add("configuration.properties: ${e.message}"); false }
+        return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, configPropsOk, errors)
     }
 
-    /**
-     * Patches server.xml to add a <Context> element inside <Host> if not already present.
-     * This tells Tomcat to deploy the webapp (parentService) at root path "/".
-     * Also sets the shutdown port to a non-negative value if it's currently -1.
-     */
     fun patchServerXml(ctx: PatchContext): Boolean {
         val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
         if (!serverXml.exists()) return false
@@ -78,7 +60,6 @@ object DeploymentConfigPatcher {
         var content = serverXml.readText()
         var modified = false
 
-        // 1. Add <Context> element if not present
         if (!content.contains("<Context ")) {
             val hostCloseTag = "</Host>"
             val contextElement = """<Context docBase="${ctx.parentService}" path="" reloadable="false"/>"""
@@ -86,29 +67,20 @@ object DeploymentConfigPatcher {
             modified = true
         }
 
-        // 2. Set shutdown port if it's -1 (disabled)
         val shutdownPortRegex = Regex("""<Server\s([^>]*?)port="-1"([^>]*?)>""")
         if (shutdownPortRegex.containsMatchIn(content)) {
             content = shutdownPortRegex.replace(content) { match ->
-                val before = match.groupValues[1]
-                val after = match.groupValues[2]
-                """<Server ${before}port="9285"${after}>"""
+                """<Server ${match.groupValues[1]}port="9285"${match.groupValues[2]}>"""
             }
             modified = true
         }
 
-        // 3. Set deployOnStartup="false" on Host if not present
         if (content.contains("<Host ") && !content.contains("deployOnStartup=")) {
-            content = content.replace(
-                Regex("""(<Host\s[^>]*?)(\s*>)"""),
-                "$1 deployOnStartup=\"false\"$2"
-            )
+            content = content.replace(Regex("""(<Host\s[^>]*?)(\s*>)"""), "$1 deployOnStartup=\"false\"$2")
             modified = true
         }
 
-        if (modified) {
-            serverXml.writeText(content)
-        }
+        if (modified) serverXml.writeText(content)
         return modified
     }
 
@@ -142,30 +114,21 @@ $JSP_SERVLET_MARKER
        
 $JSP_SERVLET_MARKER"""
 
-    /**
-     * Patches tomcat/conf/web.xml to add JSP servlet and mapping for dynamic JSP compilation.
-     * Eclipse/ZIDE adds this block so JSPs can be compiled on the fly during development.
-     */
     fun patchWebXml(ctx: PatchContext): Boolean {
         val webXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "web.xml")
         if (!webXml.exists()) return false
 
         var content = webXml.readText()
-
-        // Already patched — the ZIDE marker comment is present
         if (content.contains(JSP_SERVLET_MARKER)) return false
 
-        // Find the Built In Servlet Definitions comment and inject after it
         val servletDefsComment = "Built In Servlet Definitions"
         val idx = content.indexOf(servletDefsComment)
         if (idx == -1) return false
 
-        // Find the end of that comment line (-->)
         val commentEnd = content.indexOf("-->", idx)
         if (commentEnd == -1) return false
         val insertPos = commentEnd + 3
 
-        // Replace the comment to indicate modification, then insert the JSP block
         val originalComment = content.substring(content.lastIndexOf("<!--", idx), insertPos)
         val modifiedComment = originalComment.replace(
             "Built In Servlet Definitions",
@@ -181,8 +144,66 @@ $JSP_SERVLET_MARKER"""
     }
 
     /**
-     * Patches persistence-configurations.xml to set DBName and StartDBServer values.
-     * Eclipse sets DBName=postgres and StartDBServer=false for PGSQL dev environments.
+     * Patches configuration.properties with DB-vendor-specific values.
+     * Replicates Eclipse's pgsql_replace.xml / mysql_replace.xml logic.
+     */
+    fun patchConfigurationProperties(ctx: PatchContext): Boolean {
+        val webappDir = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "webapps", ctx.parentService)
+        val configProps = webappDir.resolve("WEB-INF").resolve("conf").resolve("configuration.properties")
+        if (!configProps.exists()) return false
+
+        var content = configProps.readText()
+        var modified = false
+
+        val replacements: Map<String, String> = if (ctx.isPgsql) {
+            mapOf(
+                "db.drivername" to "org.postgresql.Driver",
+                "db.username" to (ctx.dbUser ?: "root"),
+                "db.password" to (ctx.dbPass ?: ""),
+                "db.url" to "jdbc:postgresql://\$host:\$port/\$dbName?charSet=UNICODE",
+                "db.port" to "5432",
+                "db.schemaname" to (ctx.schemaName ?: "jbossdb"),
+                "db.name" to (ctx.dbName ?: "postgres"),
+                "db.vendor.name" to "postgres",
+                "sas.dbserver.name" to "POSTGRES"
+            )
+        } else {
+            mapOf(
+                "db.drivername" to "org.gjt.mm.mysql.Driver",
+                "db.username" to (ctx.dbUser ?: "root"),
+                "db.password" to (ctx.dbPass ?: ""),
+                "db.url" to "jdbc:mysql://\$host:\$port/\$dbName?",
+                "db.port" to "3306",
+                "db.schemaname" to (ctx.schemaName ?: "jbossdb"),
+                "db.name" to "mysql",
+                "db.vendor.name" to "mysql",
+                "sas.dbserver.name" to "MYSQL"
+            )
+        }
+
+        for ((key, value) in replacements) {
+            val regex = Regex("""(?m)^(${Regex.escape(key)}=).*$""")
+            if (regex.containsMatchIn(content)) {
+                val newContent = regex.replace(content, "$1${Regex.escapeReplacement(value)}")
+                if (newContent != content) {
+                    content = newContent
+                    modified = true
+                }
+            } else if (key == "db.password") {
+                content += "\n$key=$value"
+                modified = true
+            }
+        }
+
+        if (modified) configProps.writeText(content)
+        return modified
+    }
+
+    /**
+     * Patches persistence-configurations.xml:
+     * - DBName: "postgres" for PGSQL, "mysql" for MYSQL
+     * - DSAdapter: "saspg" for PGSQL, "sas" for MYSQL
+     * - StartDBServer: "false"
      */
     fun patchPersistenceConfig(ctx: PatchContext): Boolean {
         val webappDir = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "webapps", ctx.parentService)
@@ -193,37 +214,31 @@ $JSP_SERVLET_MARKER"""
         var content = persistenceXml.readText()
         var modified = false
 
-        // Set DBName — use "postgres" as default for PGSQL environments
-        val dbNameValue = "postgres"
+        val dbNameValue = if (ctx.isPgsql) "postgres" else "mysql"
         val dbNameRegex = Regex("""(<configuration\s+name="DBName"\s+value=")[^"]*("/)""")
         if (dbNameRegex.containsMatchIn(content)) {
-            val currentMatch = dbNameRegex.find(content)
-            if (currentMatch != null && !currentMatch.value.contains("value=\"$dbNameValue\"")) {
-                content = dbNameRegex.replace(content, "$1$dbNameValue$2")
-                modified = true
-            }
+            val newContent = dbNameRegex.replace(content, "$1$dbNameValue$2")
+            if (newContent != content) { content = newContent; modified = true }
         }
 
-        // Set StartDBServer=false
+        val dsAdapterValue = if (ctx.isPgsql) "saspg" else "sas"
+        val dsAdapterRegex = Regex("""(<configuration\s+name="DSAdapter"\s+value=")[^"]*("\s*/>)""")
+        val firstMatch = dsAdapterRegex.find(content)
+        if (firstMatch != null && !firstMatch.value.contains("value=\"$dsAdapterValue\"")) {
+            content = content.replaceFirst(dsAdapterRegex, "$1$dsAdapterValue$2")
+            modified = true
+        }
+
         val startDbRegex = Regex("""(<configuration\s+name="StartDBServer"\s+value=")[^"]*("/)""")
         if (startDbRegex.containsMatchIn(content)) {
-            val currentMatch = startDbRegex.find(content)
-            if (currentMatch != null && !currentMatch.value.contains("value=\"false\"")) {
-                content = startDbRegex.replace(content, "${"\$1"}false$2")
-                modified = true
-            }
+            val newContent = startDbRegex.replace(content, "\$1false$2")
+            if (newContent != content) { content = newContent; modified = true }
         }
 
-        if (modified) {
-            persistenceXml.writeText(content)
-        }
+        if (modified) persistenceXml.writeText(content)
         return modified
     }
 
-    /**
-     * Patches security-properties.xml to set IAM server, service name, and logout page.
-     * Eclipse reads these from zide_properties.xml and injects them.
-     */
     fun patchSecurityProperties(ctx: PatchContext): Boolean {
         val webappDir = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "webapps", ctx.parentService)
         val securityXml = webappDir.resolve("WEB-INF").resolve("security-properties.xml")
@@ -232,7 +247,6 @@ $JSP_SERVLET_MARKER"""
         var content = securityXml.readText()
         var modified = false
 
-        // Set IAM server
         if (ctx.iamServer != null) {
             val iamRegex = Regex("""(<property\s+name="com\.adventnet\.iam\.internal\.server"\s+value=")[^"]*("/)""")
             if (iamRegex.containsMatchIn(content)) {
@@ -241,15 +255,12 @@ $JSP_SERVLET_MARKER"""
             }
         }
 
-        // Set service.name
         if (ctx.iamServiceName != null) {
             val serviceNameRegex = Regex("""(<property\s+name="service\.name"\s+value=")[^"]*("/)""")
             if (serviceNameRegex.containsMatchIn(content)) {
                 content = serviceNameRegex.replace(content, "$1${ctx.iamServiceName}$2")
                 modified = true
             }
-
-            // Also set service name in root <security> element
             val securityNameRegex = Regex("""(<security\s[^>]*?name=")[^"]*("[^>]*>)""")
             if (securityNameRegex.containsMatchIn(content)) {
                 content = securityNameRegex.replace(content, "$1${ctx.iamServiceName}$2")
@@ -257,7 +268,6 @@ $JSP_SERVLET_MARKER"""
             }
         }
 
-        // Set logout page with hostname
         if (ctx.hostName != null && ctx.httpsPort != null && ctx.iamServiceName != null) {
             val logoutUrl = "https://${ctx.hostName}:${ctx.httpsPort}/logout?servicename=${ctx.iamServiceName}"
             val logoutRegex = Regex("""(<property\s+name="logout\.page"\s+value=")[^"]*("/)""")
@@ -267,15 +277,10 @@ $JSP_SERVLET_MARKER"""
             }
         }
 
-        if (modified) {
-            securityXml.writeText(content)
-        }
+        if (modified) securityXml.writeText(content)
         return modified
     }
 
-    /**
-     * Builds a PatchContext from ZIDE service.xml and zide_properties.xml data.
-     */
     fun buildPatchContext(
         serviceProps: Map<String, String>,
         zideProps: Map<String, String>
@@ -289,7 +294,11 @@ $JSP_SERVLET_MARKER"""
             iamServiceName = zideProps["ZIDE.IAM_SERVICENAME"],
             hostName = zideProps["ZIDE.HOST_NAME"],
             httpsPort = zideProps["ZIDE.HTTPS_PORT"],
+            dbType = zideProps["ZIDE_DB_TYPE"],
             dbName = zideProps["ZIDE_DB_NAME"],
+            dbUser = zideProps["ZIDE_DB_USER"],
+            dbPass = zideProps["ZIDE_DB_PASS"],
+            dbHost = zideProps["ZIDE_DB_HOST"],
             schemaName = zideProps["ZIDE.SCHEMA_NAME"]
         )
     }

@@ -108,6 +108,7 @@ class TomcatManager(private val project: Project) : Disposable {
     @Suppress("UNUSED_PARAMETER")
     fun patchDeploymentConfigs(server: TomcatServer) {
         val projectPath = project.basePath ?: return
+        ZideConfigParser.clearCache(projectPath)
         val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return
         val serviceProps = zideConfig.service?.properties ?: return
         val zideProps = zideConfig.properties?.properties ?: emptyMap()
@@ -123,12 +124,13 @@ class TomcatManager(private val project: Project) : Disposable {
 
         if (result.serverXmlPatched) log("  Patched server.xml (Context element, shutdown port)")
         if (result.webXmlPatched) log("  Patched web.xml (JSP servlet for dynamic compilation)")
-        if (result.persistencePatched) log("  Patched persistence-configurations.xml (DBName, StartDBServer)")
+        if (result.persistencePatched) log("  Patched persistence-configurations.xml (DBName, DSAdapter, StartDBServer)")
         if (result.securityPatched) log("  Patched security-properties.xml (IAM server, service name, logout URL)")
+        if (result.configPropertiesPatched) log("  Patched configuration.properties (DB driver, URL, port, vendor, credentials)")
         for (err in result.errors) {
             logError("  Patch error: $err")
         }
-        if (!result.serverXmlPatched && !result.webXmlPatched && !result.persistencePatched && !result.securityPatched && result.errors.isEmpty()) {
+        if (!result.serverXmlPatched && !result.webXmlPatched && !result.persistencePatched && !result.securityPatched && !result.configPropertiesPatched && result.errors.isEmpty()) {
             log("  Config files already up to date.")
         }
     }

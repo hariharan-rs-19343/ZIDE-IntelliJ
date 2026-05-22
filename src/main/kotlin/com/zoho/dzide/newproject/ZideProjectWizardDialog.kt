@@ -39,7 +39,6 @@ class ZideProjectWizardDialog(
     private val localBuildRadio = JRadioButton("Local Build")
     private val buildUrlField = JBTextField()
     private val buildFileField = TextFieldWithBrowseButton()
-    private val dependServicesField = JBTextField()
     private val serviceErrorLabel = JBLabel("Service is required").apply { foreground = JBColor.RED; isVisible = false }
     private val buildErrorLabel = JBLabel("Build URL or file is required").apply { foreground = JBColor.RED; isVisible = false }
 
@@ -146,19 +145,6 @@ class ZideProjectWizardDialog(
             add(JBLabel("<html><small>Select the service for which you want to create the project</small></html>"), BorderLayout.SOUTH)
         }
         panel.add(serviceHintPanel, gbc)
-        row++
-
-        // Dependent Services
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
-        gbc.insets = Insets(8, 8, 2, 8)
-        panel.add(JLabel("Dependencies:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        panel.add(dependServicesField, gbc)
-        row++
-
-        gbc.gridx = 1; gbc.gridy = row; gbc.weightx = 1.0
-        gbc.insets = Insets(0, 8, 8, 8)
-        panel.add(JBLabel("<html><small>Comma-separated dependent service names (e.g. ZOHOACCOUNTS). Optional.</small></html>"), gbc)
         row++
 
         // Separator
@@ -343,7 +329,15 @@ class ZideProjectWizardDialog(
         for (jdk in jdks) {
             jdkCombo.addItem("${jdk.name} (${jdk.homePath ?: "unknown"})")
         }
-        if (jdks.isEmpty()) {
+
+        if (jdkCombo.itemCount == 0) {
+            val javaHome = System.getenv("JAVA_HOME") ?: System.getProperty("java.home")
+            if (!javaHome.isNullOrBlank()) {
+                jdkCombo.addItem("System JDK ($javaHome)")
+            }
+        }
+
+        if (jdkCombo.itemCount == 0) {
             jdkCombo.addItem("No JDK configured")
         }
     }
@@ -364,8 +358,7 @@ class ZideProjectWizardDialog(
         val localBuildPath: String,
         val repositoryUrl: String,
         val serviceName: String,
-        val downloadUrl: String,
-        val dependServices: String
+        val downloadUrl: String
     )
 
     fun getResult(): WizardResult {
@@ -382,9 +375,8 @@ class ZideProjectWizardDialog(
             buildUrl = buildUrlField.text.trim(),
             localBuildPath = buildFileField.text.trim(),
             repositoryUrl = product?.repositoryUrl ?: "",
-            serviceName = product?.serviceName ?: "",
-            downloadUrl = product?.downloadUrl ?: "",
-            dependServices = dependServicesField.text.trim()
+            serviceName = product?.name ?: "",
+            downloadUrl = product?.downloadUrl ?: ""
         )
     }
 
