@@ -85,9 +85,11 @@ class TomcatToolWindowFactory : ToolWindowFactory {
         appLogsContent.isCloseable = false
         toolWindow.contentManager.addContent(appLogsContent)
 
-        // Listen for changes
+        // Listen for changes — must run on EDT since tree model updates Swing UI
         serverProvider.addChangeListener {
-            treeModel.reload()
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                treeModel.reload()
+            }
         }
     }
 }
