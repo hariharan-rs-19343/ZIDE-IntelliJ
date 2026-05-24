@@ -30,7 +30,7 @@ kotlin {
 
 intellijPlatform {
     pluginConfiguration {
-        id = "com.zoho.dzide"
+        id = "com.zoho.intellij.zide"
         name = providers.gradleProperty("pluginName")
         version = providers.gradleProperty("pluginVersion")
         ideaVersion {

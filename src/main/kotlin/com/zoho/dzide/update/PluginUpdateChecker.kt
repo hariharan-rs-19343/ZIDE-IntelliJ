@@ -22,8 +22,8 @@ import java.nio.file.StandardCopyOption
 object PluginUpdateChecker {
 
     private val log = Logger.getInstance(PluginUpdateChecker::class.java)
-    private const val PLUGIN_ID = "com.zoho.dzide"
-    private const val GITHUB_API_URL = "https://api.github.com/repos/hariharan-rs-19343/ZIDE-Server/releases/latest"
+    private const val PLUGIN_ID = "com.zoho.intellij.zide"
+    private const val GITHUB_API_URL = "https://api.github.com/repos/hariharan-rs-19343/ZIDE-IntelliJ/releases/latest"
 
     data class UpdateInfo(
         val currentVersion: String,

@@ -1,5 +1,5 @@
 <idea-plugin>
-    <id>com.zoho.dzide</id>
+    <id>com.zoho.intellij.zide</id>
     <name>ZIDE</name>
     <vendor>Zoho</vendor>
     <description><![CDATA[
