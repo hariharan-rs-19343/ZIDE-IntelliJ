@@ -21,7 +21,8 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
     fun create(indicator: ProgressIndicator) {
         val projectDir = File(result.location, result.name)
-        val deploymentDir = File(result.location, "deployment/${result.name}")
+        val deployServiceName = result.name
+        val deploymentDir = File(result.location, "deployment/$deployServiceName")
 
         try {
             val startTime = System.currentTimeMillis()
@@ -91,7 +92,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 if (Files.exists(rootWar)) {
                     indicator.text = "Extracting WARs..."
                     indicator.fraction = 0.55
-                    val serviceDir = webappsDir.resolve(result.name)
+                    val serviceDir = webappsDir.resolve(deployServiceName)
                     Files.createDirectories(serviceDir)
                     ProcessUtil.executeCapturing(
                         command = listOf("unzip", "-o", rootWar.toString(), "-d", serviceDir.toString()),
@@ -149,7 +150,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             if (hasBuild) {
                 indicator.text = "Running ANT hooks..."
                 indicator.fraction = 0.68
-                runHooksIfAvailable(projectDir, deploymentDir, result.name, indicator)
+                runHooksIfAvailable(projectDir, deploymentDir, deployServiceName, indicator)
             }
 
             // Step 11: Show Deployment Properties dialog for user customization

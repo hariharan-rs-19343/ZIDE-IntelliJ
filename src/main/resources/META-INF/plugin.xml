@@ -45,6 +45,17 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.0.6</b>
+        <ul>
+            <li>Deploy-sync overhaul — compiler output now points directly to deployment WEB-INF/classes/, eliminating the copy-based approach that silently failed</li>
+            <li>Build before server start — full project compilation runs before Tomcat launches, ensuring all classes are up-to-date in the deployment</li>
+            <li>Smart webapp directory detection — automatically finds the correct webapp directory on disk even when PARENT_SERVICE doesn't match (reads docBase from server.xml, scans webapps/)</li>
+            <li>Auto hot-swap in debug mode — class changes are applied automatically via JDWP without the confirmation dialog</li>
+            <li>Tomcat reloadable=true — Context element now enables auto-reload so class changes in run mode take effect without restart</li>
+            <li>Startup order fix — deployment config patching now runs after server.xml sync, preventing reloadable="true" from being overwritten</li>
+            <li>Clean deployment on Update — old webapp directory is deleted before extracting new WAR; Tomcat work/ cache cleared on every start</li>
+            <li>Existing deployments with reloadable="false" are automatically migrated to "true"</li>
+        </ul>
         <b>0.0.5</b>
         <ul>
             <li>New Project Wizard — create ZIDE projects from File > New > Project or ZIDE menu with CMTool service selection, git clone, build download, and full deployment setup</li>

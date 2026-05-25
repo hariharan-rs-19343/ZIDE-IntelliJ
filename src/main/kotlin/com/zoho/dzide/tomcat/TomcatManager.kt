@@ -7,8 +7,13 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.compiler.CompilerManager
+import com.intellij.openapi.module.ModuleManager
+import com.intellij.openapi.roots.CompilerModuleExtension
+import com.intellij.openapi.roots.ModuleRootManager
 import com.zoho.dzide.model.TomcatServer
 import com.zoho.dzide.parser.ModuleZidePropsParser
+import com.zoho.dzide.parser.PathResolver
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.PortUtil
 import com.zoho.dzide.util.ShellUtil
@@ -18,6 +23,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.exists
 
 @Service(Service.Level.PROJECT)
@@ -225,8 +232,68 @@ class TomcatManager(private val project: Project) : Disposable {
      * 2. Copy tomcat/conf/server.xml → webapp WEB-INF/conf/
      * 3. Copy Servers/{service}-config/server.xml → tomcat/conf/
      */
+    private fun cleanTomcatWorkDirectory(server: TomcatServer) {
+        val workDir = Path.of(server.path, "work")
+        if (workDir.exists()) {
+            workDir.toFile().deleteRecursively()
+            Files.createDirectories(workDir)
+            log("Cleaned Tomcat work directory.")
+        }
+    }
+
+    private fun configureCompilerOutputForDeployment(server: TomcatServer) {
+        val projectPath = project.basePath ?: return
+        val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE")
+            ?: ZideConfigParser.readZideConfig(projectPath)?.service?.properties?.get("ZIDE.PARENT_SERVICE")
+        val webappName = PathResolver.resolveWebappDirectory(server.path, parentService) ?: return
+        val outputPath = Path.of(server.path, "webapps", webappName, "WEB-INF", "classes")
+        if (!outputPath.exists()) return
+
+        com.intellij.debugger.settings.DebuggerSettings.getInstance().RUN_HOTSWAP_AFTER_COMPILE =
+            com.intellij.debugger.settings.DebuggerSettings.RUN_HOTSWAP_ALWAYS
+
+        val outputUrl = "file://${outputPath.toAbsolutePath()}"
+        ApplicationManager.getApplication().invokeAndWait {
+            ApplicationManager.getApplication().runWriteAction {
+                for (module in ModuleManager.getInstance(project).modules) {
+                    val model = ModuleRootManager.getInstance(module).modifiableModel
+                    val ext = model.getModuleExtension(CompilerModuleExtension::class.java)
+                    if (ext != null && ext.compilerOutputUrl != outputUrl) {
+                        ext.setCompilerOutputPath(outputUrl)
+                        ext.inheritCompilerOutputPath(false)
+                        model.commit()
+                        log("Set compiler output to: $outputPath")
+                    } else {
+                        model.dispose()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun buildProjectAndWait(server: TomcatServer) {
+        log("Building project before server start...")
+        val latch = CountDownLatch(1)
+        var buildSuccess = false
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) { latch.countDown(); return@invokeLater }
+            CompilerManager.getInstance(project).make(project,
+                ModuleManager.getInstance(project).modules
+            ) { aborted, errors, _, _ ->
+                buildSuccess = !aborted && errors == 0
+                if (!buildSuccess) log("Build had $errors error(s). Server will start with existing classes.")
+                latch.countDown()
+            }
+        }
+        latch.await(120, TimeUnit.SECONDS)
+        if (buildSuccess) log("Project build completed successfully.")
+    }
+
     fun runPreStartSetup(server: TomcatServer) {
         log("--- Pre-start setup ---")
+        configureCompilerOutputForDeployment(server)
+        buildProjectAndWait(server)
+        cleanTomcatWorkDirectory(server)
         runPostZideDeployScript(server)
         syncServerXmlFiles(server)
         log("--- Pre-start setup complete ---")
@@ -261,8 +328,8 @@ class TomcatManager(private val project: Project) : Disposable {
                 }
             }
 
-            patchDeploymentConfigs(server)
             runPreStartSetup(server)
+            patchDeploymentConfigs(server)
 
             log("======================================")
             log("Starting Tomcat server: ${server.name}")
@@ -327,8 +394,8 @@ class TomcatManager(private val project: Project) : Disposable {
         ApplicationManager.getApplication().executeOnPooledThread {
             if (project.isDisposed) return@executeOnPooledThread
 
-            patchDeploymentConfigs(server)
             runPreStartSetup(server)
+            patchDeploymentConfigs(server)
 
             log("======================================")
             log("Starting Tomcat server in debug mode: ${server.name}")

@@ -62,8 +62,13 @@ object DeploymentConfigPatcher {
 
         if (!content.contains("<Context ")) {
             val hostCloseTag = "</Host>"
-            val contextElement = """<Context docBase="${ctx.parentService}" path="" reloadable="false"/>"""
+            val contextElement = """<Context docBase="${ctx.parentService}" path="" reloadable="true"/>"""
             content = content.replace(hostCloseTag, "$contextElement$hostCloseTag")
+            modified = true
+        }
+
+        if (content.contains("""reloadable="false"""")) {
+            content = content.replace("""reloadable="false"""", """reloadable="true"""")
             modified = true
         }
 

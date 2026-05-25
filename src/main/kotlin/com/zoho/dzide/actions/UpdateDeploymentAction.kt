@@ -171,7 +171,15 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                         }
                         ConsoleUtil.print(console, project, "Extracted successfully.\n\n", ConsoleViewContentType.SYSTEM_OUTPUT)
 
-                        val webappsDir = deployDir.resolve("AdventNet").resolve("Sas").resolve("tomcat").resolve("webapps")
+                        val tomcatDir = deployDir.resolve("AdventNet").resolve("Sas").resolve("tomcat")
+                        val workDir = tomcatDir.resolve("work")
+                        if (Files.exists(workDir)) {
+                            ConsoleUtil.print(console, project, "Cleaning Tomcat work directory...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                            workDir.toFile().deleteRecursively()
+                            Files.createDirectories(workDir)
+                        }
+
+                        val webappsDir = tomcatDir.resolve("webapps")
                         val rootWar = webappsDir.resolve("ROOT.war")
                         if (!rootWar.exists()) {
                             ConsoleUtil.print(console, project, "ERROR: ROOT.war not found at $rootWar\n", ConsoleViewContentType.ERROR_OUTPUT)
@@ -180,6 +188,10 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                         }
 
                         val productDir = webappsDir.resolve(parentService)
+                        if (Files.exists(productDir)) {
+                            ConsoleUtil.print(console, project, "Cleaning old deployment at $parentService/...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                            productDir.toFile().deleteRecursively()
+                        }
                         Files.createDirectories(productDir)
                         ConsoleUtil.print(console, project, "[3/6] Unzipping ROOT.war as $parentService...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                         val warUnzipResult = ProcessUtil.executeCapturing(
