@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Project Identity
 - Plugin ID: `com.zoho.dzide`
-- Current Version: 0.0.5
+- Current Version: 0.0.7
 - Language: Kotlin 1.9.25, JVM 17
 - Build: Gradle 8.12 (Kotlin DSL), IntelliJ Platform Plugin 2.5.0
 - Target IDE: IntelliJ IDEA 2024.1.7+ (Community or Ultimate)
@@ -16,18 +16,19 @@ alwaysApply: true
 - Version defined in: `gradle.properties` (`pluginVersion`)
 
 ## Package Structure (`src/main/kotlin/com/zoho/dzide/`)
-- `DzidePlugin.kt` — ProjectActivity startup (logs init, checks ~/.wgetrc)
-- `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh)
-- `tomcat/` — TomcatManager (lifecycle), TomcatServerProvider (CRUD)
-- `deploysync/` — DeploySyncSaveListener, ResourceSyncManager (ANT hooks, class copy, hot-swap), AntResolver
-- `zide/` — ZideConfigParser, DeploymentConfigPatcher, ZideSetupWizard, DeploymentPropertiesDialog
-- `parser/` — ModuleZidePropsParser, PathResolver
+- `DzidePlugin.kt` — ProjectActivity startup (logs init, checks ~/.wgetrc, auto-update check)
+- `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh, RunHooks, CustomBuild, Uninstall)
+- `tomcat/` — TomcatManager (lifecycle, compiler output config, build-before-start, project libraries), TomcatServerProvider (CRUD)
+- `deploysync/` — DeploySyncSaveListener, ResourceSyncManager (ANT hooks, hot-swap trigger, auto-resource copy), AntResolver
+- `zide/` — ZideConfigParser, DeploymentConfigPatcher (server.xml, web.xml, persistence, security, HTTPS connector, keystore download), ZideSetupWizard, DeploymentPropertiesDialog
+- `parser/` — ModuleZidePropsParser, PathResolver (resolveWebappDirectory)
 - `model/` — TomcatServer, ProjectServerMapping, ZideModels, ParserModels
 - `persistence/` — TomcatServerState (dzide/tomcat-servers.xml), ZideCacheState (dzide/eclipse-zide.xml)
 - `runconfig/` — TomcatConfigurationType, TomcatRunConfiguration, TomcatRunState, Editor, Options, Factory
 - `toolwindow/` — TomcatToolWindowFactory, TomcatToolbar, TomcatTreeModel, TomcatTreeCellRenderer, TomcatTreePopupHandler
 - `util/` — ProcessUtil, ShellUtil, PortUtil, NotificationUtil, ConsoleUtil
 - `settings/` — ZideSettingsState, ZideSettingsConfigurable, CmToolConfigurable, WgetConfigurable, GitConfigurable, ZohoRepoConfigurable, PasswordFieldWithToggle
+- `update/` — PluginUpdateChecker (GitHub releases auto-update)
 
 ## Key Models
 - `TomcatServer` — id, name, path, status, port, debugPort, zide* fields (serviceKey, folderPath, propertiesPath, launchVmArguments, hookTasksRaw, autoResourceCopyRaw, repositoryModuleDir, deployType, runtimeProperties, buildXmlPath, buildBaseDir, antHomeResolvedPath)
@@ -41,23 +42,26 @@ alwaysApply: true
 - `.zide_resources/zide_hook/build.xml` — ANT script for pre-creation + zide module hooks
 
 ## Server Lifecycle
-- Start: patches configs → pre-start setup (postzidedeploy.sh, server.xml sync) → `sh catalina.sh run` with CATALINA_OPTS
-- Debug: same as start but `sh catalina.sh jpda run` with JPDA_ADDRESS=*:port, then auto-attaches RemoteConfiguration
+- Start: configureProjectLibraries → configureCompilerOutput → buildProjectAndWait → cleanWorkDir → pre-start scripts → syncServerXml → patchDeploymentConfigs → `sh catalina.sh run` with CATALINA_OPTS
+- Debug: same as start but `sh catalina.sh jpda run` with JPDA_ADDRESS=*:port, then auto-attaches RemoteConfiguration; auto hot-swap enabled (no dialog)
 - Stop: destroyProcess → fallback catalina.sh stop -force → lsof + kill -9
 - Dispose: on IDE quit, all processes destroyed + force-kill by port
 
 ## Deploy Sync (on file save)
-- .java → compile → find .class in out/production/, bin/, target/classes/, build/classes/ → copy to WEB-INF/classes/ → JDWP hot-swap
+- .java → IntelliJ auto-build compiles directly to WEB-INF/classes/ (compiler output redirected) → triggerHotSwap if debug session active → Tomcat reloadable=true detects changes in run mode
 - Other files → match hook task mappings → run ANT targets → match auto-copy mappings → copy files
 
 ## Update Deployment Flow
 1. Stop server if running
 2. Copy zip to deployment folder
 3. Extract zip
-4. Unzip ROOT.war as {parentService} in webapps/
-5. Delete *.war files
-6. Run ANT hooks (precreationhook, postservicetarget, zidemodulehook)
-7. Patch deployment configs (server.xml, web.xml, persistence, security)
+4. Clean Tomcat work/ directory
+5. Delete old webapps/{parentService}/ directory
+6. Unzip ROOT.war as {parentService} in webapps/
+7. Delete *.war files
+8. Run ANT hooks (precreationhook, postservicetarget, zidemodulehook)
+9. Patch deployment configs (server.xml, web.xml, persistence, security, HTTPS connector)
+10. Download sas.keystore to tomcat/conf/
 
 ## ANT Script Detection (Update Deployment)
 - ANT Home: persisted path → ANT_HOME env → ~/.zshrc/~/.bashrc/~/.bash_profile scan
@@ -71,10 +75,13 @@ alwaysApply: true
 - Deploy-sync hooks: uses `{repo}/.zide_resources/zide_build/build.xml` with targets from Zide.properties `hooks.resourcemodify.all.calltasks`
 
 ## Deployment Config Patching
-- server.xml: injects Context element, sets shutdown port, deployOnStartup=false
+- server.xml: injects Context element (reloadable=true), sets shutdown port, deployOnStartup=false, HTTPS Connector (port 8443, SSL keystore)
 - web.xml: adds JSP servlet + mapping for dev
 - persistence-configurations.xml: DBName=postgres, StartDBServer=false
 - security-properties.xml: IAM server, service name, logout URL
+- configuration.properties: DB driver, URL, port, vendor, credentials
+- sas.keystore: downloaded from apptier.csez.zohocorpin.com (requires VPN)
+- Existing reloadable="false" auto-migrated to "true"
 
 ## Settings (Settings > Tools > Zide)
 - CMTool: Auth Token (PasswordFieldWithToggle, stored in ZideSettingsState)
@@ -106,3 +113,9 @@ alwaysApply: true
 - ProcessUtil.executeStreaming delivers raw text chunks (don't append \n)
 - ZideConfigParser uses mtime-based in-memory caching
 - ~/.wgetrc checked on startup; missing → balloon warning
+- PathResolver.resolveWebappDirectory: tries PARENT_SERVICE → docBase from server.xml → scans webapps/ for WEB-INF/classes/
+- configureCompilerOutputForDeployment: sets IntelliJ module output to WEB-INF/classes/ via CompilerModuleExtension
+- buildProjectAndWait: CompilerManager.make() with CountDownLatch (120s timeout)
+- configureProjectLibraries: creates "ZIDE-WEB-INF-lib" project library from all WEB-INF/lib/*.jar
+- DebuggerSettings.RUN_HOTSWAP_ALWAYS set for auto hot-swap without dialog
+- DeploymentConfigPatcher.downloadKeystoreFile: HTTP download with 10s/15s timeout, shows warning on failure

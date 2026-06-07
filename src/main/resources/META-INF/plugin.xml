@@ -16,19 +16,25 @@
             <li>Add, edit, and remove Tomcat server configurations from a dedicated tool window</li>
             <li>Start, stop, and restart servers with real-time log streaming</li>
             <li>Run and debug Java projects on Tomcat with JPDA auto-attach</li>
+            <li>Full project build before server start ensures all classes are compiled</li>
             <li>Servers automatically killed when IntelliJ quits or restarts</li>
         </ul>
         <h3>Deploy Sync</h3>
         <ul>
-            <li>Auto-compile and hot-swap Java classes on save (debug mode)</li>
+            <li>Compiler output directed to deployment WEB-INF/classes/ — auto-build on save writes directly to deployment</li>
+            <li>Auto hot-swap in debug mode — no confirmation dialog</li>
+            <li>Tomcat auto-reload in run mode via reloadable=true</li>
             <li>ANT hook tasks and auto-resource copy for JSP, JS, CSS, and XML changes</li>
-            <li>Compiled class files synced to deployment WEB-INF/classes/</li>
+            <li>Smart webapp directory detection (docBase, directory scanning)</li>
         </ul>
         <h3>Deployment</h3>
         <ul>
             <li>Update Deployment — Custom Build (remote URL download) or Local Build (zip file)</li>
             <li>Deployment Properties — edit Host Name, IAM Server, ports, database configuration</li>
-            <li>Deployment config patching — server.xml, web.xml, persistence, and security configs</li>
+            <li>Deployment config patching — server.xml, web.xml, persistence, security, HTTPS Connector</li>
+            <li>SSL keystore auto-download from Zoho internal server</li>
+            <li>Auto-configure project libraries from WEB-INF/lib/ JARs</li>
+            <li>Clean old deployment and Tomcat work cache on update</li>
         </ul>
         <h3>Settings</h3>
         <ul>
@@ -41,6 +47,7 @@
             <li>ZIDE menu with keyboard shortcuts for all actions</li>
             <li>App Logs viewer with color-coded ERROR/WARN highlighting</li>
             <li>ANT build integration</li>
+            <li>Auto-update from GitHub releases on startup</li>
         </ul>
     ]]></description>
 
