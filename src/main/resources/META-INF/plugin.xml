@@ -304,6 +304,25 @@
                         icon="AllIcons.Actions.Execute"/>
             </group>
 
+            <group id="dzide.DDMigrationGroup"
+                   text="DD Migration"
+                   description="Data Dictionary migration tools"
+                   popup="true"
+                   icon="AllIcons.Nodes.DataTables">
+
+                <action id="dzide.SqlFileMigration"
+                        class="com.zoho.dzide.ddmigration.SqlFileMigrationAction"
+                        text="Run SQL Migration"
+                        description="Upload and execute a dd-changes.sql file"
+                        icon="AllIcons.FileTypes.Any_type"/>
+            </group>
+
+            <action id="dzide.ReinitDb"
+                    class="com.zoho.dzide.actions.ReinitDbAction"
+                    text="Reinit DB"
+                    description="Drop and recreate the local database"
+                    icon="AllIcons.Actions.Restart"/>
+
             <action id="dzide.DeploymentProperties"
                     class="com.zoho.dzide.actions.DeploymentPropertiesAction"
                     text="Deployment Properties"
@@ -332,6 +351,12 @@
                     <keyboard-shortcut keymap="$default" first-keystroke="meta shift U"/>
                 </action>
             </group>
+
+            <action id="dzide.SetupDependencies"
+                    class="com.zoho.dzide.actions.SetupDependenciesAction"
+                    text="Setup Dependencies"
+                    description="Link deployment JARs to project module"
+                    icon="AllIcons.Nodes.PpLib"/>
 
             <action id="dzide.AppLogs"
                     class="com.zoho.dzide.actions.AppLogsAction"
@@ -377,5 +402,15 @@
                 icon="AllIcons.Actions.StartDebugger">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+
+        <!-- ZIDE context menu in project view (right-click) -->
+        <group id="dzide.ProjectViewContextMenu"
+               text="ZIDE"
+               description="ZIDE actions"
+               popup="true"
+               icon="/icons/zide-toolwindow.svg"
+               class="com.zoho.dzide.actions.ZideActionGroup">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="dzide.DebugOnServer.ProjectView"/>
+        </group>
     </actions>
 </idea-plugin>

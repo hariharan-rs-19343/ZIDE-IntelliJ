@@ -6,6 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import com.zoho.dzide.update.PluginUpdateChecker
 import com.zoho.dzide.util.NotificationUtil
+import com.zoho.dzide.util.ProxyConfig
 import java.io.File
 
 class DzidePlugin : ProjectActivity {
@@ -14,6 +15,8 @@ class DzidePlugin : ProjectActivity {
 
     override suspend fun execute(project: Project) {
         log.info("DZIDE plugin initialized for project: ${project.name}")
+
+        ProxyConfig.applyToSystemProperties()
 
         val wgetrcFile = File(System.getProperty("user.home"), ".wgetrc")
         if (!wgetrcFile.exists()) {

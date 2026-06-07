@@ -18,14 +18,33 @@ class DeploymentPropertiesDialog(
     private val readOnly: Boolean = false
 ) : DialogWrapper(project, true) {
 
-    private data class FieldDef(val key: String, val label: String)
+    enum class FieldValidator {
+        NONE,
+        NOT_EMPTY,
+        PORT_NUMBER;
+
+        fun validate(value: String): String? = when (this) {
+            NONE -> null
+            NOT_EMPTY -> if (value.isBlank()) "Value cannot be empty" else null
+            PORT_NUMBER -> {
+                val port = value.toIntOrNull()
+                when {
+                    port == null -> "Must be a valid number"
+                    port < 1 || port > 65535 -> "Port must be between 1 and 65535"
+                    else -> null
+                }
+            }
+        }
+    }
+
+    private data class FieldDef(val key: String, val label: String, val validator: FieldValidator = FieldValidator.NONE)
 
     private val fields = listOf(
-        FieldDef("ZIDE.HOST_NAME", "Host Name"),
+        FieldDef("ZIDE.HOST_NAME", "Host Name", FieldValidator.NOT_EMPTY),
         FieldDef("ZIDE.USER_MAIL", "User EMail"),
-        FieldDef("ZIDE.IAM_SERVER", "IAM Server"),
-        FieldDef("ZIDE.HTTP_PORT", "Http Port"),
-        FieldDef("ZIDE.HTTPS_PORT", "Https Port"),
+        FieldDef("ZIDE.IAM_SERVER", "IAM Server", FieldValidator.NOT_EMPTY),
+        FieldDef("ZIDE.HTTP_PORT", "Http Port", FieldValidator.PORT_NUMBER),
+        FieldDef("ZIDE.HTTPS_PORT", "Https Port", FieldValidator.PORT_NUMBER),
         FieldDef("ZIDE.IAM_SERVICENAME", "IAM Service Name")
     )
 
@@ -195,6 +214,18 @@ class DeploymentPropertiesDialog(
         val isPostgres = postgresRadio.isSelected
         dbNameLabel?.isVisible = isPostgres
         dbNameField?.isVisible = isPostgres
+    }
+
+    override fun doValidate(): com.intellij.openapi.ui.ValidationInfo? {
+        if (readOnly) return null
+        for (field in fields) {
+            val tf = textFields[field.key] ?: continue
+            val error = field.validator.validate(tf.text.trim())
+            if (error != null) {
+                return com.intellij.openapi.ui.ValidationInfo("${field.label}: $error", tf)
+            }
+        }
+        return null
     }
 
     fun getUpdatedProperties(): Map<String, String> {

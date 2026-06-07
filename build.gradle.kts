@@ -22,6 +22,13 @@ dependencies {
         zipSigner()
     }
     testImplementation("junit:junit:4.13.2")
+
+    // Database drivers for reinit and DD migration
+    implementation("org.postgresql:postgresql:42.7.2")
+    implementation("com.mysql:mysql-connector-j:9.1.0")
+
+    // VCS integration
+    implementation("org.eclipse.jgit:org.eclipse.jgit:7.0.0.202409031743-r")
 }
 
 kotlin {

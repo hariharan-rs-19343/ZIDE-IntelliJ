@@ -21,6 +21,7 @@ import com.zoho.dzide.util.PortUtil
 import com.zoho.dzide.util.ShellUtil
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.ZideConfigParser
+import com.intellij.openapi.diagnostic.Logger
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -31,6 +32,8 @@ import kotlin.io.path.exists
 
 @Service(Service.Level.PROJECT)
 class TomcatManager(private val project: Project) : Disposable {
+
+    private val log = Logger.getInstance(TomcatManager::class.java)
 
     var consoleView: ConsoleView? = null
     var appLogsConsoleView: ConsoleView? = null

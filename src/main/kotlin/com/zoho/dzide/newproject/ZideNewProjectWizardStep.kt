@@ -5,6 +5,7 @@ import com.intellij.ide.wizard.NewProjectWizardBaseData
 import com.intellij.ide.wizard.NewProjectWizardStep
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.observable.properties.GraphProperty
 import com.intellij.openapi.observable.util.equalsTo
 import com.intellij.openapi.observable.util.trim
@@ -16,6 +17,7 @@ import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.dsl.builder.*
 import com.zoho.dzide.settings.ZideSettingsState
+import com.zoho.dzide.vcs.GitService
 import javax.swing.DefaultComboBoxModel
 import javax.swing.SwingUtilities
 
@@ -68,9 +70,17 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
                 textField()
                     .bindText(branchProperty)
                     .columns(COLUMNS_MEDIUM)
+                    .validationOnInput { field ->
+                        if (field.text.trim().isEmpty()) {
+                            ValidationInfo("Branch name cannot be empty", field)
+                        } else null
+                    }
+                    .validationOnApply { field ->
+                        validateBranch(field.text.trim(), field)
+                    }
             }
             row("") {
-                comment("Branch to clone from the repository")
+                comment("Branch to clone from the repository (validated against remote)")
             }
 
             separator()
@@ -117,7 +127,10 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
 
         if (!ZideProjectCreator.ensureCmToolToken()) return
 
-        val selectedProduct = products.find { it.name == serviceProperty.get() }
+        val cleanServiceName = serviceProperty.get().removePrefix("★ ").trim()
+        val selectedProduct = products.find { it.name == cleanServiceName }
+
+        saveRecentService(cleanServiceName)
         val selectedJdkHome = resolveJdkHomePath(jdkProperty.get())
 
         val wizardResult = ZideProjectWizardDialog.WizardResult(
@@ -144,6 +157,23 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
         })
     }
 
+    private fun validateBranch(branchText: String, component: javax.swing.JTextField): ValidationInfo? {
+        if (branchText.isBlank()) {
+            return ValidationInfo("Branch name cannot be empty", component)
+        }
+        val selectedProduct = products.find { it.name == serviceProperty.get() }
+        val repoUrl = selectedProduct?.repositoryUrl
+        if (repoUrl.isNullOrBlank()) return null
+
+        return try {
+            if (!GitService.branchExists(repoUrl, branchText)) {
+                ValidationInfo("Branch '$branchText' not found in repository", component)
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun loadProducts() {
         val token = ZideSettingsState.getInstance().cmToolAuthToken
         if (token.isBlank()) {
@@ -159,10 +189,22 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 val fetched = CmToolApiClient.fetchProducts(token, personalOnly)
+                val recentNames = getRecentServiceNames()
+
+                val recentProducts = fetched.filter { it.name in recentNames }
+                    .sortedBy { recentNames.indexOf(it.name) }
+                val otherProducts = fetched.filterNot { it.name in recentNames }
+                    .sortedBy { it.name }
+
                 SwingUtilities.invokeLater {
                     products = fetched
                     serviceModel.removeAllElements()
-                    for (product in fetched) {
+                    if (recentProducts.isNotEmpty()) {
+                        for (product in recentProducts) {
+                            serviceModel.addElement("★ ${product.name}")
+                        }
+                    }
+                    for (product in otherProducts) {
                         serviceModel.addElement(product.name)
                     }
                 }
@@ -201,5 +243,24 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
             if (display == comboText) return jdk.homePath ?: ""
         }
         return ""
+    }
+
+    companion object {
+        private const val RECENT_SERVICES_KEY = "dzide.recent.services"
+        private const val MAX_RECENT = 5
+
+        private fun getRecentServiceNames(): List<String> {
+            val stored = PropertiesComponent.getInstance().getValue(RECENT_SERVICES_KEY, "")
+            return if (stored.isNotEmpty()) stored.split(",") else emptyList()
+        }
+
+        private fun saveRecentService(serviceName: String) {
+            if (serviceName.isBlank()) return
+            val recent = getRecentServiceNames().toMutableList()
+            recent.remove(serviceName)
+            recent.add(0, serviceName)
+            val trimmed = recent.take(MAX_RECENT)
+            PropertiesComponent.getInstance().setValue(RECENT_SERVICES_KEY, trimmed.joinToString(","))
+        }
     }
 }
