@@ -1,6 +1,12 @@
 package com.zoho.dzide.zide
 
+import com.intellij.openapi.project.Project
+import com.zoho.dzide.util.NotificationUtil
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -40,17 +46,21 @@ object DeploymentConfigPatcher {
         val persistencePatched: Boolean = false,
         val securityPatched: Boolean = false,
         val configPropertiesPatched: Boolean = false,
+        val httpsConnectorPatched: Boolean = false,
+        val keystoreDownloaded: Boolean = false,
         val errors: List<String> = emptyList()
     )
 
-    fun patchAll(ctx: PatchContext): PatchResult {
+    fun patchAll(ctx: PatchContext, project: Project? = null): PatchResult {
         val errors = mutableListOf<String>()
         val serverXmlOk = try { patchServerXml(ctx) } catch (e: Exception) { errors.add("server.xml: ${e.message}"); false }
         val webXmlOk = try { patchWebXml(ctx) } catch (e: Exception) { errors.add("web.xml: ${e.message}"); false }
         val persistenceOk = try { patchPersistenceConfig(ctx) } catch (e: Exception) { errors.add("persistence-configurations.xml: ${e.message}"); false }
         val securityOk = try { patchSecurityProperties(ctx) } catch (e: Exception) { errors.add("security-properties.xml: ${e.message}"); false }
         val configPropsOk = try { patchConfigurationProperties(ctx) } catch (e: Exception) { errors.add("configuration.properties: ${e.message}"); false }
-        return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, configPropsOk, errors)
+        val httpsOk = try { patchHttpsConnector(ctx) } catch (e: Exception) { errors.add("HTTPS connector: ${e.message}"); false }
+        val keystoreOk = try { downloadKeystoreFile(ctx.deploymentFolder, project) } catch (e: Exception) { errors.add("sas.keystore: ${e.message}"); false }
+        return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, configPropsOk, httpsOk, keystoreOk, errors)
     }
 
     fun patchServerXml(ctx: PatchContext): Boolean {
@@ -87,6 +97,63 @@ object DeploymentConfigPatcher {
 
         if (modified) serverXml.writeText(content)
         return modified
+    }
+
+    private const val ZIDE_SSL_CONNECTOR = """<Connector port="8443"
+       maxThreads="150"
+       minSpareThreads="25"
+       maxSpareThreads="75"
+       enableLookups="false"
+       disableUploadTimeout="true"
+       useBodyEncodingForURI="true"
+       acceptCount="100"
+       connectionTimeout="20000"
+       debug="4"
+       scheme="https"
+       secure="true"
+       clientAuth="false"
+       sslProtocol="TLS"
+       SSLEnabled="true"
+       keystoreFile="conf/sas.keystore"
+       keystoreType="JKS"
+       keystorePass="N5${'$'}0IfC:4o:^KJ"
+ />"""
+
+    fun patchHttpsConnector(ctx: PatchContext): Boolean {
+        val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
+        if (!serverXml.exists()) return false
+
+        var content = serverXml.readText()
+        val existingConnectorRegex = Regex("""<Connector[^>]*port="8443"[^/]*/?>""", RegexOption.DOT_MATCHES_ALL)
+        if (existingConnectorRegex.containsMatchIn(content)) {
+            content = existingConnectorRegex.replace(content, ZIDE_SSL_CONNECTOR)
+        } else {
+            content = content.replace("</Service>", "    $ZIDE_SSL_CONNECTOR\n    </Service>")
+        }
+        serverXml.writeText(content)
+        return true
+    }
+
+    fun downloadKeystoreFile(deploymentFolder: String, project: Project?): Boolean {
+        val destPath = Path.of(deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "sas.keystore")
+        Files.createDirectories(destPath.parent)
+        return try {
+            val url = URL("https://apptier.csez.zohocorpin.com/_static/keystore/2026-2027/sas.keystore")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 15_000
+            conn.connect()
+            if (conn.responseCode == 200) {
+                conn.inputStream.use { input -> Files.copy(input, destPath, StandardCopyOption.REPLACE_EXISTING) }
+                true
+            } else {
+                NotificationUtil.warn(project, "Failed to download sas.keystore (HTTP ${conn.responseCode}). Please make sure whether the internet connection is proper.")
+                false
+            }
+        } catch (e: Exception) {
+            NotificationUtil.warn(project, "Failed to download sas.keystore: Please make sure whether the internet connection is proper.")
+            false
+        }
     }
 
     private const val JSP_SERVLET_MARKER =

@@ -45,6 +45,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.0.7</b>
+        <ul>
+            <li>SSL Keystore — automatically downloads sas.keystore from Zoho internal server to tomcat/conf/ during project creation and Update Deployment</li>
+            <li>HTTPS Connector — patches server.xml with port 8443 SSL Connector (keystoreFile, keystorePass, TLS) on every deployment</li>
+            <li>Auto-configure project libraries — all JARs from WEB-INF/lib/ are added as IntelliJ project library on server start, enabling code completion and compilation</li>
+            <li>Network error handling — shows "Please make sure whether the internet connection is proper" if keystore download fails (VPN required)</li>
+        </ul>
         <b>0.0.6</b>
         <ul>
             <li>Deploy-sync overhaul — compiler output now points directly to deployment WEB-INF/classes/, eliminating the copy-based approach that silently failed</li>

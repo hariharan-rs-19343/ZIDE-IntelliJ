@@ -11,6 +11,8 @@ import com.intellij.openapi.compiler.CompilerManager
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.roots.CompilerModuleExtension
 import com.intellij.openapi.roots.ModuleRootManager
+import com.intellij.openapi.roots.OrderRootType
+import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
 import com.zoho.dzide.model.TomcatServer
 import com.zoho.dzide.parser.ModuleZidePropsParser
 import com.zoho.dzide.parser.PathResolver
@@ -127,13 +129,15 @@ class TomcatManager(private val project: Project) : Disposable {
         }
 
         log("Patching deployment configs for ${patchCtx.parentService}...")
-        val result = DeploymentConfigPatcher.patchAll(patchCtx)
+        val result = DeploymentConfigPatcher.patchAll(patchCtx, project)
 
         if (result.serverXmlPatched) log("  Patched server.xml (Context element, shutdown port)")
         if (result.webXmlPatched) log("  Patched web.xml (JSP servlet for dynamic compilation)")
         if (result.persistencePatched) log("  Patched persistence-configurations.xml (DBName, DSAdapter, StartDBServer)")
         if (result.securityPatched) log("  Patched security-properties.xml (IAM server, service name, logout URL)")
         if (result.configPropertiesPatched) log("  Patched configuration.properties (DB driver, URL, port, vendor, credentials)")
+        if (result.httpsConnectorPatched) log("  Patched HTTPS Connector (port 8443, SSL keystore)")
+        if (result.keystoreDownloaded) log("  Downloaded sas.keystore to tomcat/conf/")
         for (err in result.errors) {
             logError("  Patch error: $err")
         }
@@ -241,6 +245,51 @@ class TomcatManager(private val project: Project) : Disposable {
         }
     }
 
+    fun configureProjectLibraries(server: TomcatServer) {
+        val projectPath = project.basePath ?: return
+        val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE")
+            ?: ZideConfigParser.readZideConfig(projectPath)?.service?.properties?.get("ZIDE.PARENT_SERVICE")
+        val webappName = PathResolver.resolveWebappDirectory(server.path, parentService) ?: return
+        val libDir = Path.of(server.path, "webapps", webappName, "WEB-INF", "lib")
+        if (!libDir.toFile().exists()) return
+
+        val jars = libDir.toFile().listFiles()?.filter { it.extension == "jar" } ?: return
+        if (jars.isEmpty()) return
+
+        ApplicationManager.getApplication().invokeAndWait {
+            ApplicationManager.getApplication().runWriteAction {
+                try {
+                    val libraryTable = LibraryTablesRegistrar.getInstance().getLibraryTable(project)
+                    val tableModel = libraryTable.modifiableModel
+
+                    tableModel.getLibraryByName("ZIDE-WEB-INF-lib")?.let { tableModel.removeLibrary(it) }
+
+                    val library = tableModel.createLibrary("ZIDE-WEB-INF-lib")
+                    val libModel = library.modifiableModel
+                    for (jar in jars) {
+                        libModel.addRoot("jar://${jar.absolutePath}!/", OrderRootType.CLASSES)
+                    }
+                    libModel.commit()
+                    tableModel.commit()
+
+                    for (module in ModuleManager.getInstance(project).modules) {
+                        val rootModel = ModuleRootManager.getInstance(module).modifiableModel
+                        val alreadyHas = rootModel.orderEntries.any {
+                            it is com.intellij.openapi.roots.LibraryOrderEntry && it.libraryName == "ZIDE-WEB-INF-lib"
+                        }
+                        if (!alreadyHas) {
+                            rootModel.addLibraryEntry(library)
+                        }
+                        rootModel.commit()
+                    }
+                    log("Configured ${jars.size} JAR(s) from WEB-INF/lib/ as project library.")
+                } catch (e: Exception) {
+                    log("Failed to configure project libraries: ${e.message}")
+                }
+            }
+        }
+    }
+
     private fun configureCompilerOutputForDeployment(server: TomcatServer) {
         val projectPath = project.basePath ?: return
         val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE")
@@ -291,6 +340,7 @@ class TomcatManager(private val project: Project) : Disposable {
 
     fun runPreStartSetup(server: TomcatServer) {
         log("--- Pre-start setup ---")
+        configureProjectLibraries(server)
         configureCompilerOutputForDeployment(server)
         buildProjectAndWait(server)
         cleanTomcatWorkDirectory(server)

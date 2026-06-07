@@ -307,7 +307,7 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                             zideProps
                         )
                         if (patchCtx != null) {
-                            val patchResult = DeploymentConfigPatcher.patchAll(patchCtx)
+                            val patchResult = DeploymentConfigPatcher.patchAll(patchCtx, project)
                             if (patchResult.serverXmlPatched)
                                 ConsoleUtil.print(console, project, "  Patched server.xml (Context element, shutdown port)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             if (patchResult.webXmlPatched)
@@ -316,6 +316,10 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                                 ConsoleUtil.print(console, project, "  Patched persistence-configurations.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             if (patchResult.securityPatched)
                                 ConsoleUtil.print(console, project, "  Patched security-properties.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                            if (patchResult.httpsConnectorPatched)
+                                ConsoleUtil.print(console, project, "  Patched HTTPS Connector (port 8443, SSL keystore)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                            if (patchResult.keystoreDownloaded)
+                                ConsoleUtil.print(console, project, "  Downloaded sas.keystore to tomcat/conf/\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             for (err in patchResult.errors) {
                                 ConsoleUtil.print(console, project, "  Patch error: $err\n", ConsoleViewContentType.ERROR_OUTPUT)
                             }
