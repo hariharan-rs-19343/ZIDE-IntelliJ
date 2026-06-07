@@ -10,7 +10,6 @@ import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.DeploymentPropertiesDialog
 import com.zoho.dzide.zide.ZideConfigParser
-import kotlinx.coroutines.*
 import java.io.File
 import java.net.InetAddress
 import java.nio.file.Files
@@ -29,78 +28,33 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             val startTime = System.currentTimeMillis()
             log.info("Service creation for ${result.serviceName} (${result.name}) started")
 
-            // Steps 1+4 run concurrently: clone repo and download build in parallel
-            val needsClone = result.repositoryUrl.isNotBlank()
-            val needsRemoteDownload = result.buildType == "remote" && result.buildUrl.isNotBlank()
-
-            val buildZip: Path?
-
-            if (needsClone && needsRemoteDownload) {
-                indicator.text = "Cloning repository and downloading build..."
+            // Step 1: Clone repository
+            if (result.repositoryUrl.isNotBlank()) {
+                indicator.text = "Cloning repository..."
                 indicator.fraction = 0.05
-
-                val (cloneError, downloadResult) = runBlocking {
-                    coroutineScope {
-                        val cloneJob = async(Dispatchers.IO) {
-                            try {
-                                cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
-                                null
-                            } catch (e: Exception) {
-                                e
-                            }
-                        }
-
-                        val downloadJob = async(Dispatchers.IO) {
-                            try {
-                                downloadBuild(result.buildUrl, result.name, indicator)
-                            } catch (e: Exception) {
-                                log.warn("Build download failed (will continue without build): ${e.message}")
-                                null
-                            }
-                        }
-
-                        val cloneErr = cloneJob.await()
-                        if (cloneErr != null) {
-                            downloadJob.cancel()
-                            return@coroutineScope Pair(cloneErr, null)
-                        }
-
-                        val dlResult = downloadJob.await()
-                        Pair(null, dlResult)
-                    }
-                }
-
-                if (cloneError != null) throw RuntimeException("Git clone failed: ${cloneError.message}", cloneError)
-                buildZip = downloadResult
-                indicator.fraction = 0.40
+                cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
             } else {
-                // Non-parallel path: clone only, download only, or local build
-                if (needsClone) {
-                    indicator.text = "Cloning repository..."
-                    indicator.fraction = 0.05
-                    cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
-                } else {
-                    indicator.text = "Creating project directory..."
-                    indicator.fraction = 0.0
-                    Files.createDirectories(projectDir.toPath())
-                }
+                indicator.text = "Creating project directory..."
+                indicator.fraction = 0.0
+                Files.createDirectories(projectDir.toPath())
+            }
 
-                buildZip = when (result.buildType) {
-                    "remote" -> {
-                        if (result.buildUrl.isNotBlank()) {
-                            indicator.text = "Downloading build..."
-                            indicator.fraction = 0.20
-                            downloadBuild(result.buildUrl, result.name, indicator)
-                        } else null
-                    }
-                    "local" -> {
-                        if (result.localBuildPath.isNotBlank()) {
-                            val localFile = File(result.localBuildPath)
-                            if (localFile.exists()) localFile.toPath() else null
-                        } else null
-                    }
-                    else -> null
+            // Step 4: Download or locate build
+            val buildZip: Path? = when (result.buildType) {
+                "remote" -> {
+                    if (result.buildUrl.isNotBlank()) {
+                        indicator.text = "Downloading build..."
+                        indicator.fraction = 0.20
+                        downloadBuild(result.buildUrl, result.name, indicator)
+                    } else null
                 }
+                "local" -> {
+                    if (result.localBuildPath.isNotBlank()) {
+                        val localFile = File(result.localBuildPath)
+                        if (localFile.exists()) localFile.toPath() else null
+                    } else null
+                }
+                else -> null
             }
 
             // Step 2: Add .gitignore entries
@@ -213,7 +167,13 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 patchDeploymentConfigs(projectDir, deploymentDir)
             }
 
-            // Step 13: Open project in IntelliJ
+            // Step 13: Configure IntelliJ module (source roots + libraries)
+            indicator.text = "Configuring project module..."
+            indicator.fraction = 0.85
+            writeModuleIml(projectDir, deploymentDir, result)
+            writeModulesXml(projectDir, result)
+
+            // Step 14: Open project in IntelliJ
             indicator.text = "Opening project..."
             indicator.fraction = 0.90
             ApplicationManager.getApplication().invokeLater {
@@ -777,6 +737,51 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         if (patchResult.errors.isNotEmpty()) {
             log.warn("Deployment config patching had errors: ${patchResult.errors.joinToString("; ")}")
         }
+    }
+
+    private fun writeModuleIml(projectDir: File, deploymentDir: File, result: ZideProjectWizardDialog.WizardResult) {
+        val moduleName = result.name
+        val imlFile = File(projectDir, "$moduleName.iml")
+        val sources = "src/main/java"
+        val deployServiceName = result.name
+        val libDir = File(deploymentDir, "AdventNet/Sas/tomcat/webapps/$deployServiceName/WEB-INF/lib")
+
+        val iml = buildString {
+            appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+            appendLine("""<module type="JAVA_MODULE" version="4">""")
+            appendLine("""  <component name="NewModuleRootManager" inherit-compiler-output="true">""")
+            appendLine("""    <exclude-output />""")
+            appendLine("""    <content url="file://${'$'}MODULE_DIR${'$'}">""")
+            appendLine("""      <sourceFolder url="file://${'$'}MODULE_DIR${'$'}/$sources" isTestSource="false" />""")
+            appendLine("""    </content>""")
+            appendLine("""    <orderEntry type="jdk" jdkName="${result.jdk}" jdkType="JavaSDK" />""")
+            appendLine("""    <orderEntry type="sourceFolder" forTests="false" />""")
+            if (libDir.exists()) {
+                for (jar in libDir.listFiles()?.filter { it.extension == "jar" } ?: emptyList()) {
+                    appendLine("""    <orderEntry type="module-library">""")
+                    appendLine("""      <library><CLASSES><root url="jar://${jar.absolutePath}!/" /></CLASSES></library>""")
+                    appendLine("""    </orderEntry>""")
+                }
+            }
+            appendLine("""  </component>""")
+            appendLine("""</module>""")
+        }
+        imlFile.writeText(iml)
+    }
+
+    private fun writeModulesXml(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
+        val ideaDir = File(projectDir, ".idea")
+        ideaDir.mkdirs()
+        val modulesXml = File(ideaDir, "modules.xml")
+        modulesXml.writeText("""<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://${'$'}PROJECT_DIR${'$'}/${result.name}.iml" filepath="${'$'}PROJECT_DIR${'$'}/${result.name}.iml" />
+    </modules>
+  </component>
+</project>
+""")
     }
 
     private fun rollback(projectDir: File, deploymentDir: File) {
