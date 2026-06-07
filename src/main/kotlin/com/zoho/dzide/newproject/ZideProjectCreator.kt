@@ -10,6 +10,7 @@ import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.DeploymentPropertiesDialog
 import com.zoho.dzide.zide.ZideConfigParser
+import kotlinx.coroutines.*
 import java.io.File
 import java.net.InetAddress
 import java.nio.file.Files
@@ -28,46 +29,91 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             val startTime = System.currentTimeMillis()
             log.info("Service creation for ${result.serviceName} (${result.name}) started")
 
-            // Step 1: Clone repository
-            if (result.repositoryUrl.isNotBlank()) {
-                indicator.text = "Cloning repository..."
+            // Steps 1+4 run concurrently: clone repo and download build in parallel
+            val needsClone = result.repositoryUrl.isNotBlank()
+            val needsRemoteDownload = result.buildType == "remote" && result.buildUrl.isNotBlank()
+
+            val buildZip: Path?
+
+            if (needsClone && needsRemoteDownload) {
+                indicator.text = "Cloning repository and downloading build..."
                 indicator.fraction = 0.05
-                cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
+
+                val (cloneError, downloadResult) = runBlocking {
+                    coroutineScope {
+                        val cloneJob = async(Dispatchers.IO) {
+                            try {
+                                cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
+                                null
+                            } catch (e: Exception) {
+                                e
+                            }
+                        }
+
+                        val downloadJob = async(Dispatchers.IO) {
+                            try {
+                                downloadBuild(result.buildUrl, result.name, indicator)
+                            } catch (e: Exception) {
+                                log.warn("Build download failed (will continue without build): ${e.message}")
+                                null
+                            }
+                        }
+
+                        val cloneErr = cloneJob.await()
+                        if (cloneErr != null) {
+                            downloadJob.cancel()
+                            return@coroutineScope Pair(cloneErr, null)
+                        }
+
+                        val dlResult = downloadJob.await()
+                        Pair(null, dlResult)
+                    }
+                }
+
+                if (cloneError != null) throw RuntimeException("Git clone failed: ${cloneError.message}", cloneError)
+                buildZip = downloadResult
+                indicator.fraction = 0.40
             } else {
-                indicator.text = "Creating project directory..."
-                indicator.fraction = 0.0
-                Files.createDirectories(projectDir.toPath())
+                // Non-parallel path: clone only, download only, or local build
+                if (needsClone) {
+                    indicator.text = "Cloning repository..."
+                    indicator.fraction = 0.05
+                    cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
+                } else {
+                    indicator.text = "Creating project directory..."
+                    indicator.fraction = 0.0
+                    Files.createDirectories(projectDir.toPath())
+                }
+
+                buildZip = when (result.buildType) {
+                    "remote" -> {
+                        if (result.buildUrl.isNotBlank()) {
+                            indicator.text = "Downloading build..."
+                            indicator.fraction = 0.20
+                            downloadBuild(result.buildUrl, result.name, indicator)
+                        } else null
+                    }
+                    "local" -> {
+                        if (result.localBuildPath.isNotBlank()) {
+                            val localFile = File(result.localBuildPath)
+                            if (localFile.exists()) localFile.toPath() else null
+                        } else null
+                    }
+                    else -> null
+                }
             }
 
             // Step 2: Add .gitignore entries
             indicator.text = "Configuring .gitignore..."
-            indicator.fraction = 0.10
+            indicator.fraction = 0.42
             addGitIgnoreEntries(projectDir)
 
             // Step 3: Create .zide_resources folder
             indicator.text = "Creating ZIDE metadata..."
-            indicator.fraction = 0.12
+            indicator.fraction = 0.44
             val zideResourcesDir = File(projectDir, ".zide_resources")
             if (!zideResourcesDir.exists()) {
                 zideResourcesDir.mkdirs()
-            }
-
-            // Step 4: Download build archive
-            val buildZip: Path? = when (result.buildType) {
-                "remote" -> {
-                    if (result.buildUrl.isNotBlank()) {
-                        indicator.text = "Downloading build..."
-                        indicator.fraction = 0.20
-                        downloadBuild(result.buildUrl, result.name, indicator)
-                    } else null
-                }
-                "local" -> {
-                    if (result.localBuildPath.isNotBlank()) {
-                        val localFile = File(result.localBuildPath)
-                        if (localFile.exists()) localFile.toPath() else null
-                    } else null
-                }
-                else -> null
             }
 
             // Step 5: Extract into deployment folder
