@@ -754,7 +754,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             appendLine("""    <content url="file://${'$'}MODULE_DIR${'$'}">""")
             appendLine("""      <sourceFolder url="file://${'$'}MODULE_DIR${'$'}/$sources" isTestSource="false" />""")
             appendLine("""    </content>""")
-            appendLine("""    <orderEntry type="jdk" jdkName="${result.jdk}" jdkType="JavaSDK" />""")
+            appendLine("""    <orderEntry type="inheritedJdk" />""")
             appendLine("""    <orderEntry type="sourceFolder" forTests="false" />""")
             if (libDir.exists()) {
                 for (jar in libDir.listFiles()?.filter { it.extension == "jar" } ?: emptyList()) {

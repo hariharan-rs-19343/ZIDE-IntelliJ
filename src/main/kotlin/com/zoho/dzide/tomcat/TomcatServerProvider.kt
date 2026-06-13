@@ -61,8 +61,20 @@ class TomcatServerProvider(private val project: Project) {
 
     fun getMappings(): List<ProjectServerMapping> = state.getMappings()
 
-    fun getProjectMapping(projectPath: String): ProjectServerMapping? =
-        state.getProjectMapping(projectPath)
+    fun getProjectMapping(projectPath: String): ProjectServerMapping? {
+        val basePath = project.basePath ?: return state.getProjectMapping(projectPath)
+        val normalized = java.nio.file.Paths.get(projectPath).toAbsolutePath().normalize().toString()
+        return state.getMappings().find { mapping ->
+            val resolvedPath = mapping.projectPath
+                .replace("\$PROJECT_DIR\$", basePath)
+                .replace("${'$'}PROJECT_DIR${'$'}", basePath)
+            try {
+                java.nio.file.Paths.get(resolvedPath).toAbsolutePath().normalize().toString() == normalized
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
 
     fun setProjectMapping(mapping: ProjectServerMapping) {
         state.setProjectMapping(mapping)

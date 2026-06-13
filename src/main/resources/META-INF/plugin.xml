@@ -32,9 +32,9 @@
             <li>Update Deployment — Custom Build (remote URL download) or Local Build (zip file)</li>
             <li>Deployment Properties — edit Host Name, IAM Server, ports, database configuration</li>
             <li>Deployment config patching — server.xml, web.xml, persistence, security, HTTPS Connector</li>
-            <li>SSL keystore auto-download from Zoho internal server</li>
             <li>Auto-configure project libraries from WEB-INF/lib/ JARs</li>
             <li>Clean old deployment and Tomcat work cache on update</li>
+            <li>Deploy sync on file create, edit, move, and delete (VFS-based)</li>
         </ul>
         <h3>Settings</h3>
         <ul>
@@ -54,10 +54,14 @@
     <change-notes><![CDATA[
         <b>0.0.7</b>
         <ul>
-            <li>SSL Keystore — automatically downloads sas.keystore from Zoho internal server to tomcat/conf/ during project creation and Update Deployment</li>
-            <li>HTTPS Connector — patches server.xml with port 8443 SSL Connector (keystoreFile, keystorePass, TLS) on every deployment</li>
-            <li>Auto-configure project libraries — all JARs from WEB-INF/lib/ are added as IntelliJ project library on server start, enabling code completion and compilation</li>
-            <li>Network error handling — shows "Please make sure whether the internet connection is proper" if keystore download fails (VPN required)</li>
+            <li>Kotlin 2.2 + Java 21 — upgraded build toolchain (Gradle 9.0, IntelliJ Platform Plugin 2.16.0, min IDE 2024.3)</li>
+            <li>Deploy sync rewrite — unified VFS listener handles file create, edit, move, and delete; copies/removes files in deployment folder instantly</li>
+            <li>Deploy sync server resolution — uses project.basePath directly with $PROJECT_DIR$ macro expansion; robust fallback to first server</li>
+            <li>PostgreSQL reinit — now executes bundled postgres_functions.sql (UNIX_TIMESTAMP, GROUP_CONCAT, pgcrypto, citext) after schema creation</li>
+            <li>Project .iml uses inheritedJdk — no longer hardcodes JDK name, uses project-level JDK setting</li>
+            <li>SSL keystore &amp; HTTPS connector disabled — methods preserved for future re-enablement</li>
+            <li>Auto-configure project libraries — all JARs from WEB-INF/lib/ added as IntelliJ project library on server start</li>
+            <li>Diagnostic logging — deploy sync events logged at INFO level in idea.log for debugging</li>
         </ul>
         <b>0.0.6</b>
         <ul>
@@ -159,10 +163,6 @@
         <notificationGroup id="DZIDE Notifications"
                           displayType="BALLOON"
                           toolWindowId="SAS-ZIDE"/>
-
-        <!-- File save listener for deploy sync -->
-        <fileDocumentManagerListener
-                implementation="com.zoho.dzide.deploysync.DeploySyncSaveListener"/>
 
         <!-- ZIDE New Project Wizard (modern sidebar entry) -->
         <newProjectWizard.generator implementation="com.zoho.dzide.newproject.ZideNewProjectWizard"/>
@@ -420,4 +420,9 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="dzide.DebugOnServer.ProjectView"/>
         </group>
     </actions>
+
+    <applicationListeners>
+        <listener class="com.zoho.dzide.deploysync.DeploySyncFileCreationListener"
+                  topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
+    </applicationListeners>
 </idea-plugin>

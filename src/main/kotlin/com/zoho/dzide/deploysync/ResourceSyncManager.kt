@@ -5,6 +5,7 @@ import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.zoho.dzide.model.TomcatServer
 import com.zoho.dzide.parser.ModuleZidePropsParser
@@ -22,6 +23,8 @@ import kotlin.io.path.extension
 @Service(Service.Level.PROJECT)
 class ResourceSyncManager(private val project: Project) : Disposable {
 
+    private val ideaLog = Logger.getInstance(ResourceSyncManager::class.java)
+
     var consoleView: ConsoleView? = null
 
     private val lastExecutionByPath = ConcurrentHashMap<String, Long>()
@@ -37,14 +40,55 @@ class ResourceSyncManager(private val project: Project) : Disposable {
         return now - previous < 300
     }
 
-    private fun getServerForProject(projectPath: String, filePath: String): TomcatServer? {
+    private fun resolveProjectDirMacro(path: String): String {
+        val basePath = project.basePath ?: return path
+        return path
+            .replace("\$PROJECT_DIR\$", basePath)
+            .replace("${'$'}PROJECT_DIR${'$'}", basePath)
+    }
+
+    private fun resolveServerMacros(server: TomcatServer): TomcatServer {
+        return server.copy(
+            path = resolveProjectDirMacro(server.path),
+            zideFolderPath = server.zideFolderPath?.let { resolveProjectDirMacro(it) },
+            zidePropertiesPath = server.zidePropertiesPath?.let { resolveProjectDirMacro(it) },
+            zideBuildXmlPath = server.zideBuildXmlPath?.let { resolveProjectDirMacro(it) },
+            zideBuildBaseDir = server.zideBuildBaseDir?.let { resolveProjectDirMacro(it) }
+        )
+    }
+
+    /**
+     * Resolves the server for this project using a simple, robust approach:
+     * 1. Try the project mapping by basePath
+     * 2. Fallback: return the first server in this project's state
+     *
+     * No file-path matching needed — the project identity is already
+     * resolved by DeploySyncSaveListener before calling handleDocumentSave().
+     */
+    private fun getServerForProject(): TomcatServer? {
         val serverProvider = TomcatServerProvider.getInstance(project)
-        val mappings = serverProvider.getMappings()
-        val matched = mappings
-            .filter { PathResolver.isSubPath(it.projectPath, filePath) || PathResolver.isSubPath(projectPath, it.projectPath) }
-            .sortedByDescending { it.projectPath.length }
-            .firstOrNull() ?: return null
-        return serverProvider.getServer(matched.serverId)
+        val basePath = project.basePath
+
+        if (basePath != null) {
+            val mapping = serverProvider.getProjectMapping(basePath)
+            if (mapping != null) {
+                val server = serverProvider.getServer(mapping.serverId)
+                if (server != null) {
+                    ideaLog.debug("Deploy sync: resolved server '${server.name}' via project mapping (basePath=$basePath)")
+                    return server
+                }
+            }
+        }
+
+        val servers = serverProvider.getServers()
+        if (servers.isNotEmpty()) {
+            val server = servers.first()
+            ideaLog.debug("Deploy sync: resolved server '${server.name}' via fallback (first of ${servers.size} servers)")
+            return server
+        }
+
+        ideaLog.warn("Deploy sync: no servers configured. basePath=$basePath, mappings=${serverProvider.getMappings().map { "projectPath='${it.projectPath}' serverId='${it.serverId}'" }}")
+        return null
     }
 
     private fun isPathWithinFolder(relativePath: String, folder: String): Boolean =
@@ -133,6 +177,7 @@ class ResourceSyncManager(private val project: Project) : Disposable {
 
     private fun runAutoCopyForFile(projectRoot: String, server: TomcatServer, filePath: String, projectName: String) {
         val mappings = ModuleZidePropsParser.parseAutoCopyMappings(server.zideAutoResourceCopyRaw, projectName)
+        var copied = false
         for (mapping in mappings) {
             val sourceRoot = Path.of(projectRoot, mapping.sourcePath).toString()
             if (!PathResolver.isSubPath(sourceRoot, filePath)) continue
@@ -148,12 +193,15 @@ class ResourceSyncManager(private val project: Project) : Disposable {
                 Files.createDirectories(destinationPath.parent)
                 Files.copy(Path.of(filePath), destinationPath, StandardCopyOption.REPLACE_EXISTING)
                 log("Copied resource: $filePath -> $destinationPath")
+                copied = true
             } catch (e: Exception) {
                 log("Resource copy failed for $filePath: ${e.message}")
             }
         }
+        if (!copied && mappings.isNotEmpty()) {
+            log("No auto-copy mapping matched for: ${Path.of(filePath).fileName}")
+        }
     }
-
 
     private fun triggerHotSwap() {
         ApplicationManager.getApplication().invokeLater {
@@ -175,37 +223,89 @@ class ResourceSyncManager(private val project: Project) : Disposable {
     fun handleDocumentSave(filePath: String) {
         if (shouldDebounce(filePath)) return
 
-        val projectRoot = PathResolver.findNearestProjectRoot(filePath) ?: return
+        val projectRoot = project.basePath
+        if (projectRoot == null) {
+            ideaLog.debug("Deploy sync: project.basePath is null for ${project.name}")
+            return
+        }
+
+        val server = getServerForProject()
+        if (server == null) {
+            log("Deploy sync skipped: no server configured for this project.")
+            return
+        }
+
+        val resolved = resolveServerMacros(server)
+        val refreshed = refreshServerFromZideProperties(resolved)
         val projectDirectoryName = Path.of(projectRoot).fileName.toString()
-        val server = getServerForProject(projectRoot, filePath) ?: return
-        val refreshedServer = refreshServerFromZideProperties(server)
-        val m19ProjectName = refreshedServer.repositoryModuleDir ?: projectDirectoryName
-        if (filePath.endsWith(".java")) {
-            // Compiler output is set directly to deployment WEB-INF/classes/,
-            // so IntelliJ's auto-build writes .class files there on save.
-            // We only need to trigger JDWP hot-swap if a debug session is active.
+        val m19ProjectName = refreshed.repositoryModuleDir ?: projectDirectoryName
+
+        val fileExtension = Path.of(filePath).extension
+        if (fileExtension == "java") {
             triggerHotSwap()
             return
         }
 
+        log("Deploy sync triggered for .$fileExtension file: ${Path.of(filePath).fileName}")
+        ideaLog.info("Deploy sync: file=${Path.of(filePath).fileName}, server=${refreshed.name}, tomcatPath=${refreshed.path}, autoCopy=${refreshed.zideAutoResourceCopyRaw}, hooks=${refreshed.zideHookTasksRaw}")
+
         val relativePath = PathResolver.stripProjectPrefix(
             PathResolver.toProjectRelativePath(projectRoot, filePath), m19ProjectName
         )
-        val hookMappings = ModuleZidePropsParser.parseHookTaskMappings(refreshedServer.zideHookTasksRaw, m19ProjectName)
+        val hookMappings = ModuleZidePropsParser.parseHookTaskMappings(refreshed.zideHookTasksRaw, m19ProjectName)
+        var hookMatched = false
         for (mapping in hookMappings) {
             if (!isPathWithinFolder(relativePath, mapping.folder)) continue
+            hookMatched = true
             val deltaResourcesPath = PathResolver.normalizePathSlashes("$projectDirectoryName/${mapping.folder}")
             val deltaResources = PathResolver.normalizePathSlashes(
                 Path.of(mapping.folder).relativize(Path.of(relativePath)).toString()
             ).ifEmpty { "null" }
-            runAntTarget(projectRoot, refreshedServer, mapping.antTarget, deltaResourcesPath, deltaResources)
+            runAntTarget(projectRoot, refreshed, mapping.antTarget, deltaResourcesPath, deltaResources)
+        }
+        if (!hookMatched && hookMappings.isNotEmpty()) {
+            log("No hook mapping matched for: $relativePath")
         }
 
-        runAutoCopyForFile(projectRoot, refreshedServer, filePath, projectDirectoryName)
+        if (refreshed.zideAutoResourceCopyRaw.isNullOrBlank()) {
+            log("No auto-copy mappings configured. Skipping resource copy for: ${Path.of(filePath).fileName}")
+        } else {
+            runAutoCopyForFile(projectRoot, refreshed, filePath, projectDirectoryName)
+        }
+    }
+
+    fun handleFileDelete(filePath: String) {
+        val projectRoot = project.basePath ?: return
+        val server = getServerForProject() ?: return
+        val resolved = resolveServerMacros(server)
+        val projectDirectoryName = Path.of(projectRoot).fileName.toString()
+
+        val mappings = ModuleZidePropsParser.parseAutoCopyMappings(resolved.zideAutoResourceCopyRaw, projectDirectoryName)
+        for (mapping in mappings) {
+            val sourceRoot = Path.of(projectRoot, mapping.sourcePath).toString()
+            if (!PathResolver.isSubPath(sourceRoot, filePath)) continue
+
+            val subPath = Path.of(sourceRoot).relativize(Path.of(filePath)).toString()
+            val destinationRoot = Path.of(
+                resolved.path,
+                PathResolver.applyProjectNamePlaceholder(mapping.destinationPathTemplate, projectDirectoryName)
+            )
+            val destinationPath = destinationRoot.resolve(subPath)
+
+            if (destinationPath.exists()) {
+                try {
+                    Files.delete(destinationPath)
+                    log("Deleted from deployment: $destinationPath")
+                    ideaLog.info("Deploy sync: deleted $destinationPath (source: $filePath)")
+                } catch (e: Exception) {
+                    log("Failed to delete from deployment: $destinationPath — ${e.message}")
+                }
+            }
+        }
     }
 
     override fun dispose() {
-        // Clean up resources
+        lastExecutionByPath.clear()
     }
 
     companion object {

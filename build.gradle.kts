@@ -1,7 +1,7 @@
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.25"
-    id("org.jetbrains.intellij.platform") version "2.5.0"
+    id("org.jetbrains.kotlin.jvm") version "2.2.0"
+    id("org.jetbrains.intellij.platform") version "2.16.0"
 }
 
 group = providers.gradleProperty("pluginGroup").get()
@@ -32,7 +32,7 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 }
 
 intellijPlatform {
@@ -41,7 +41,7 @@ intellijPlatform {
         name = providers.gradleProperty("pluginName")
         version = providers.gradleProperty("pluginVersion")
         ideaVersion {
-            sinceBuild = "241"
+            sinceBuild = "243"
             untilBuild = provider { null }
         }
         vendor {
@@ -64,7 +64,7 @@ intellijPlatform {
 
 tasks {
     wrapper {
-        gradleVersion = "8.12"
+        gradleVersion = "9.0"
     }
 
     named<Zip>("buildPlugin") {

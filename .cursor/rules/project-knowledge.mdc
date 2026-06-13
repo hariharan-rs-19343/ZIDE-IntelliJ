@@ -19,7 +19,7 @@ alwaysApply: true
 - `DzidePlugin.kt` — ProjectActivity startup (logs init, checks ~/.wgetrc, auto-update check)
 - `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh, RunHooks, CustomBuild, Uninstall)
 - `tomcat/` — TomcatManager (lifecycle, compiler output config, build-before-start, project libraries), TomcatServerProvider (CRUD)
-- `deploysync/` — DeploySyncSaveListener, ResourceSyncManager (ANT hooks, hot-swap trigger, auto-resource copy), AntResolver
+- `deploysync/` — DeploySyncFileCreationListener (BulkFileListener for create/move/save/delete), ResourceSyncManager (ANT hooks, hot-swap trigger, auto-resource copy, file delete sync), AntResolver
 - `zide/` — ZideConfigParser, DeploymentConfigPatcher (server.xml, web.xml, persistence, security, HTTPS connector, keystore download), ZideSetupWizard, DeploymentPropertiesDialog
 - `parser/` — ModuleZidePropsParser, PathResolver (resolveWebappDirectory)
 - `model/` — TomcatServer, ProjectServerMapping, ZideModels, ParserModels
@@ -47,9 +47,14 @@ alwaysApply: true
 - Stop: destroyProcess → fallback catalina.sh stop -force → lsof + kill -9
 - Dispose: on IDE quit, all processes destroyed + force-kill by port
 
-## Deploy Sync (on file save)
+## Deploy Sync (VFS events via BulkFileListener)
 - .java → IntelliJ auto-build compiles directly to WEB-INF/classes/ (compiler output redirected) → triggerHotSwap if debug session active → Tomcat reloadable=true detects changes in run mode
-- Other files → match hook task mappings → run ANT targets → match auto-copy mappings → copy files
+- Other file save (VFileContentChangeEvent) → match hook task mappings → run ANT targets → match auto-copy mappings → copy files
+- File creation (VFileCreateEvent) → same as save: hooks + auto-copy
+- File move (VFileMoveEvent) → same as save: hooks + auto-copy
+- File deletion (VFileDeleteEvent, in before()) → match auto-copy mappings → delete corresponding file from deployment
+- Server resolution uses project.basePath + fallback to first server (handles $PROJECT_DIR$ macro)
+- DeploySyncSaveListener removed — all events handled by DeploySyncFileCreationListener
 
 ## Update Deployment Flow
 1. Stop server if running

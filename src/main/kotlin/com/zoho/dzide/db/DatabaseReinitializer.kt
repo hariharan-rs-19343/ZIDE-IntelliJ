@@ -36,16 +36,34 @@ class PostgresReinitializer : DatabaseReinitializer {
             conn.createStatement().use { it.execute("CREATE DATABASE \"$dbName\"") }
         }
 
-        if (schemaName.isNotBlank() && schemaName != "public") {
-            val dbUrl = "jdbc:postgresql://$host:$port/$dbName"
-            DriverManager.getConnection(dbUrl, user, pass).use { conn ->
-                conn.autoCommit = true
+        val dbUrl = "jdbc:postgresql://$host:$port/$dbName"
+        DriverManager.getConnection(dbUrl, user, pass).use { conn ->
+            conn.autoCommit = true
+
+            if (schemaName.isNotBlank() && schemaName != "public") {
                 log.info("[ReinitDB] Creating schema $schemaName")
                 conn.createStatement().use { it.execute("CREATE SCHEMA IF NOT EXISTS \"$schemaName\"") }
             }
+
+            executePostgresFunctions(conn)
         }
 
         log.info("[ReinitDB] PostgreSQL reinit complete for $dbName")
+    }
+
+    private fun executePostgresFunctions(conn: Connection) {
+        val sql = javaClass.getResourceAsStream("/sql/postgres_functions.sql")?.bufferedReader()?.readText()
+        if (sql == null) {
+            log.warn("[ReinitDB] postgres_functions.sql not found in plugin resources, skipping")
+            return
+        }
+        try {
+            log.info("[ReinitDB] Executing postgres_functions.sql (MySQL compatibility functions + extensions)")
+            conn.createStatement().use { it.execute(sql) }
+            log.info("[ReinitDB] postgres_functions.sql executed successfully")
+        } catch (e: Exception) {
+            log.warn("[ReinitDB] postgres_functions.sql execution had errors (some functions may already exist): ${e.message}")
+        }
     }
 }
 

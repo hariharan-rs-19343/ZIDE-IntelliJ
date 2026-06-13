@@ -58,8 +58,11 @@ object DeploymentConfigPatcher {
         val persistenceOk = try { patchPersistenceConfig(ctx) } catch (e: Exception) { errors.add("persistence-configurations.xml: ${e.message}"); false }
         val securityOk = try { patchSecurityProperties(ctx) } catch (e: Exception) { errors.add("security-properties.xml: ${e.message}"); false }
         val configPropsOk = try { patchConfigurationProperties(ctx) } catch (e: Exception) { errors.add("configuration.properties: ${e.message}"); false }
-        val httpsOk = try { patchHttpsConnector(ctx) } catch (e: Exception) { errors.add("HTTPS connector: ${e.message}"); false }
-        val keystoreOk = try { downloadKeystoreFile(ctx.deploymentFolder, project) } catch (e: Exception) { errors.add("sas.keystore: ${e.message}"); false }
+        // Disabled: SSL keystore download and HTTPS connector patching
+        // val httpsOk = try { patchHttpsConnector(ctx) } catch (e: Exception) { errors.add("HTTPS connector: ${e.message}"); false }
+        // val keystoreOk = try { downloadKeystoreFile(ctx.deploymentFolder, project) } catch (e: Exception) { errors.add("sas.keystore: ${e.message}"); false }
+        val httpsOk = false
+        val keystoreOk = false
         return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, configPropsOk, httpsOk, keystoreOk, errors)
     }
 

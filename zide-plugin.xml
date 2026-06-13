@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <plugins>
-    <plugin id="com.memobile.intellij.zide"
-            url="https://github.com/hariharan-rs-19343/ZIDE-IntelliJ/releases/download/V0.0.5/zide-intelliJ-plugin-0.0.5.zip"
-            version="0.0.5">
+    <plugin id="com.zoho.intellij.zide"
+            url="https://github.com/hariharan-rs-19343/ZIDE-IntelliJ/releases/download/V0.0.7/zide-intelliJ-plugin-0.0.7.zip"
+            version="0.0.7">
         <name>ZIDE</name>
         <vendor>Zoho Corporation</vendor>
         <description><![CDATA[
@@ -10,12 +10,15 @@
         <ul>
             <li>Add, edit, and remove Tomcat servers from the SAS-ZIDE tool window</li>
             <li>Run and Debug servers with JPDA auto-attach support</li>
-            <li>ANT build integration and deploy-sync on save</li>
-            <li>Auto-configure from Eclipse ZIDE projects</li>
-            <li>Application log viewer and deployment updates</li>
+            <li>Deploy sync on file create, edit, move, and delete</li>
+            <li>ANT build integration and hot-swap on save</li>
+            <li>New Project Wizard with CMTools integration</li>
+            <li>Database reinit (PostgreSQL + MySQL) with postgres_functions.sql</li>
+            <li>Auto-configure project libraries and deployment patching</li>
+            <li>Auto-update from GitHub releases on startup</li>
         </ul>
     ]]></description>
 
-        <idea-version since-build="241" until-build="251.*"/>
+        <idea-version since-build="243"/>
     </plugin>
 </plugins>

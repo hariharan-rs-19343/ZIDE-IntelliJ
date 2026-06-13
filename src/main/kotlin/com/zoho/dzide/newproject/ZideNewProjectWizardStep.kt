@@ -103,9 +103,8 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
 
             row("Build File:") {
                 textFieldWithBrowseButton(
-                    "Select Build Zip",
-                    context.project,
-                    FileChooserDescriptorFactory.createSingleFileDescriptor("zip")
+                    FileChooserDescriptorFactory.createSingleFileDescriptor("zip").withTitle("Select Build Zip"),
+                    context.project
                 )
                     .bindText(localBuildPathProperty)
                     .columns(COLUMNS_LARGE)
