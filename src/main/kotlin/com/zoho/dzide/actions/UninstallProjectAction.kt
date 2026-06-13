@@ -90,13 +90,12 @@ class UninstallProjectAction : AnAction("Uninstall Project", "Remove ZIDE projec
                     }
 
                     if (deleteProjectDir) {
-                        // Step 4: Close project and delete directory
-                        indicator.text = "Closing project..."
+                        // Step 4: Delete directory, close project, show Welcome Screen
+                        indicator.text = "Deleting project directory..."
                         indicator.fraction = 0.7
 
                         ApplicationManager.getApplication().invokeLater {
                             val projectDir = File(projectPath)
-                            ProjectManager.getInstance().closeAndDispose(project)
                             if (projectDir.exists()) {
                                 val deleted = projectDir.deleteRecursively()
                                 if (deleted) {
@@ -105,6 +104,8 @@ class UninstallProjectAction : AnAction("Uninstall Project", "Remove ZIDE projec
                                     log.warn("Failed to fully delete project directory: $projectPath")
                                 }
                             }
+                            ProjectManager.getInstance().closeAndDispose(project)
+                            com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame.showIfNoProjectOpened()
                         }
                     } else {
                         // Step 4b: Clean up .zide_resources content only
