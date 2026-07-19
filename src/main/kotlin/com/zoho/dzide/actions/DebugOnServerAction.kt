@@ -23,23 +23,13 @@ class DebugOnServerAction : AnAction("Debug", "Start server in debug mode and at
         try {
             tomcatManager.startServerInDebug(server, debugPort)
 
-            // Wait for the HTTP port (proves server is up) — do NOT probe the debug port
-            // with a raw TCP socket, as JDWP interprets it as a debugger and kills the
-            // listener on handshake failure.
-            NotificationUtil.info(project, "Waiting for server to start before attaching debugger...")
+            // With JPDA_SUSPEND=y, the JVM halts immediately after opening the JPDA socket
+            // and waits for a debugger to connect. We wait a short delay for the socket to
+            // initialize, then attach the debugger. Once attached, the server resumes and
+            // startup breakpoints will be hit.
+            NotificationUtil.info(project, "Starting server in debug mode (suspend=y). Attaching debugger to port $debugPort...")
             ApplicationManager.getApplication().executeOnPooledThread {
-                val ready = PortUtil.waitForPort(server.port, 60000)
-                if (!ready) {
-                    ApplicationManager.getApplication().invokeLater {
-                        if (!project.isDisposed) {
-                            NotificationUtil.error(project, "Server HTTP port ${server.port} did not become available. Server may have failed to start.")
-                        }
-                    }
-                    return@executeOnPooledThread
-                }
-
-                // Give JPDA a moment to fully initialize after server is up
-                Thread.sleep(2000)
+                Thread.sleep(3000)
 
                 ApplicationManager.getApplication().invokeLater {
                     if (project.isDisposed) return@invokeLater
@@ -69,7 +59,7 @@ class DebugOnServerAction : AnAction("Debug", "Start server in debug mode and at
                                         settings,
                                         com.intellij.execution.executors.DefaultDebugExecutor.getDebugExecutorInstance()
                                     )
-                                    NotificationUtil.info(project, "Debugger attaching to ${server.name} on port $debugPort.")
+                                    NotificationUtil.info(project, "Debugger attached to ${server.name} on port $debugPort. Server resuming...")
                                 }
                             }
                         }

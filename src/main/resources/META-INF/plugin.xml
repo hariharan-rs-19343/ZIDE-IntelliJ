@@ -52,6 +52,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.0.8</b>
+        <ul>
+            <li>Debug startup breakpoints — JPDA_SUSPEND=y causes the JVM to halt until the debugger attaches; breakpoints in service startup code (ZhareHubService.start(), Util.setSystemProperties(), etc.) are now hit</li>
+            <li>Debug attach order fixed — debugger attaches immediately after JPDA socket opens (3s delay) instead of waiting for the HTTP port; server resumes with debugger active</li>
+        </ul>
         <b>0.0.7</b>
         <ul>
             <li>Kotlin 2.2 + Java 21 — upgraded build toolchain (Gradle 9.0, IntelliJ Platform Plugin 2.16.0, min IDE 2024.3)</li>

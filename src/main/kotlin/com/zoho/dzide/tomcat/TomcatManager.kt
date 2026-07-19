@@ -108,6 +108,7 @@ class TomcatManager(private val project: Project) : Disposable {
         if (debugPort != null) {
             env["JPDA_ADDRESS"] = "*:$debugPort"
             env["JPDA_TRANSPORT"] = "dt_socket"
+            env["JPDA_SUSPEND"] = "y"
         }
         val launchArgs = resolveEffectiveLaunchArgs(server)
         if (launchArgs != null) {
