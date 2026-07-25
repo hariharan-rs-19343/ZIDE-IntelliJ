@@ -10,6 +10,13 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 - **Debug startup breakpoints** — `JPDA_SUSPEND=y` added to `TomcatManager.buildCatalinaEnvVars()`. The JVM now halts immediately after the JPDA socket opens and waits for the debugger before executing any code. Breakpoints in `ZhareHubService.start()`, `Util.setSystemProperties()`, and other startup methods are now hit reliably.
 - **Debug attach order** — `DebugOnServerAction` now attaches the debugger after a short delay (3 seconds for the JPDA socket to initialize) instead of waiting for the server HTTP port to become available. The server resumes with the debugger already connected, so startup breakpoints are active.
 
+### Changed
+- **Eclipse create/patch parity** — create order is pre hooks → module → post/zide hooks → props dialog → open + auto Tomcat register; config replace runs at start with `ZIDE.DO_REPLACE` gating.
+- **Removed invented keystore/HTTPS connector patching** — plugin never downloads or overwrites `sas.keystore` (App. Server container owns SSL).
+- **Data-driven Replacer** — product `install.xml` / `install.properties` at launch, with hardcoded `DeploymentConfigPatcher` fallback (HTTP port included).
+- **Wizard parity** — product download URL, MI deployment, runnable services, start-after-create; `DependencyLinker` on create.
+- **Full Tomcat version** in server name (e.g. `9.0.120.0`).
+
 ---
 
 ## [0.0.7] — 2026-06-13
@@ -27,7 +34,7 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 
 ### Changed
 - Project `.iml` uses `inheritedJdk` — no longer hardcodes JDK name.
-- SSL keystore and HTTPS connector patching disabled (project creation handles it).
+- SSL keystore and HTTPS connector patching removed (not Eclipse behavior).
 
 ---
 

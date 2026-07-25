@@ -20,7 +20,10 @@ alwaysApply: true
 - `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh, RunHooks, CustomBuild, Uninstall)
 - `tomcat/` — TomcatManager (lifecycle, compiler output config, build-before-start, project libraries), TomcatServerProvider (CRUD)
 - `deploysync/` — DeploySyncFileCreationListener (BulkFileListener for create/move/save/delete), ResourceSyncManager (ANT hooks, hot-swap trigger, auto-resource copy, file delete sync), AntResolver
-- `zide/` — ZideConfigParser, DeploymentConfigPatcher (server.xml, web.xml, persistence, security, HTTPS connector, keystore download), ZideSetupWizard, DeploymentPropertiesDialog
+- `zide/` — ZideConfigParser, DeploymentConfigPatcher (server.xml, web.xml, persistence, security, HTTP port — no keystore/HTTPS connector), ZideSetupWizard, DeploymentPropertiesDialog
+- `config/replacer/` — data-driven install.xml / install.properties Replacer at launch (Eclipse parity)
+- `newproject/` — ZideProjectCreator, wizard dialogs/steps, CmToolApiClient
+- `dependency/` — DependencyLinker (WEB-INF/lib project library)
 - `parser/` — ModuleZidePropsParser, PathResolver (resolveWebappDirectory)
 - `model/` — TomcatServer, ProjectServerMapping, ZideModels, ParserModels
 - `persistence/` — TomcatServerState (dzide/tomcat-servers.xml), ZideCacheState (dzide/eclipse-zide.xml)
@@ -65,8 +68,7 @@ alwaysApply: true
 6. Unzip ROOT.war as {parentService} in webapps/
 7. Delete *.war files
 8. Run ANT hooks (precreationhook, postservicetarget, zidemodulehook)
-9. Patch deployment configs (server.xml, web.xml, persistence, security, HTTPS connector)
-10. Download sas.keystore to tomcat/conf/
+9. Reset ZIDE.DO_REPLACE=false; apply install.xml Replacer or hardcoded DeploymentConfigPatcher; set DO_REPLACE=true
 
 ## ANT Script Detection (Update Deployment)
 - ANT Home: persisted path → ANT_HOME env → ~/.zshrc/~/.bashrc/~/.bash_profile scan
@@ -80,12 +82,14 @@ alwaysApply: true
 - Deploy-sync hooks: uses `{repo}/.zide_resources/zide_build/build.xml` with targets from Zide.properties `hooks.resourcemodify.all.calltasks`
 
 ## Deployment Config Patching
-- server.xml: injects Context element (reloadable=true), sets shutdown port, deployOnStartup=false, HTTPS Connector (port 8443, SSL keystore)
-- web.xml: adds JSP servlet + mapping for dev
-- persistence-configurations.xml: DBName=postgres, StartDBServer=false
-- security-properties.xml: IAM server, service name, logout URL
-- configuration.properties: DB driver, URL, port, vendor, credentials
-- sas.keystore: downloaded from apptier.csez.zohocorpin.com (requires VPN)
+- Primary: product `install.xml` / `install.properties` via `config/replacer` at start (gated by `ZIDE.DO_REPLACE` / Settings `replacerEveryStart`)
+- Fallback hardcoded patcher:
+  - server.xml: Context (reloadable=true), shutdown port, deployOnStartup=false, HTTP Connector port from ZIDE.HTTP_PORT
+  - web.xml: JSP servlet + mapping for dev
+  - persistence-configurations.xml: DBName=postgres, StartDBServer=false
+  - security-properties.xml: IAM server, service name, logout URL
+  - configuration.properties: DB driver, URL, port, vendor, credentials, http.port
+- Plugin never downloads or overwrites `sas.keystore` and never injects HTTPS Connector (App. Server container owns SSL; Eclipse-aligned)
 - Existing reloadable="false" auto-migrated to "true"
 
 ## Settings (Settings > Tools > Zide)
@@ -123,4 +127,5 @@ alwaysApply: true
 - buildProjectAndWait: CompilerManager.make() with CountDownLatch (120s timeout)
 - configureProjectLibraries: creates "ZIDE-WEB-INF-lib" project library from all WEB-INF/lib/*.jar
 - DebuggerSettings.RUN_HOTSWAP_ALWAYS set for auto hot-swap without dialog
-- DeploymentConfigPatcher.downloadKeystoreFile: HTTP download with 10s/15s timeout, shows warning on failure
+- Create order (Eclipse-aligned): pre hooks → module → post/zide hooks → props dialog → open + auto Tomcat register
+- Config replace at start after syncServerXml; never download/replace sas.keystore

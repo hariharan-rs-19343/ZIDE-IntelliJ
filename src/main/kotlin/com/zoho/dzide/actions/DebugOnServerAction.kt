@@ -2,7 +2,7 @@ package com.zoho.dzide.actions
 
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.ApplicationManager
+import com.zoho.dzide.debug.DebuggerAttachUtil
 import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.PortUtil
@@ -22,52 +22,8 @@ class DebugOnServerAction : AnAction("Debug", "Start server in debug mode and at
 
         try {
             tomcatManager.startServerInDebug(server, debugPort)
-
-            // With JPDA_SUSPEND=y, the JVM halts immediately after opening the JPDA socket
-            // and waits for a debugger to connect. We wait a short delay for the socket to
-            // initialize, then attach the debugger. Once attached, the server resumes and
-            // startup breakpoints will be hit.
-            NotificationUtil.info(project, "Starting server in debug mode (suspend=y). Attaching debugger to port $debugPort...")
-            ApplicationManager.getApplication().executeOnPooledThread {
-                Thread.sleep(3000)
-
-                ApplicationManager.getApplication().invokeLater {
-                    if (project.isDisposed) return@invokeLater
-                    try {
-                        val runManager = com.intellij.execution.RunManager.getInstance(project)
-                        val remoteConfigType = com.intellij.execution.configurations.ConfigurationTypeUtil
-                            .findConfigurationType("Remote")
-                        if (remoteConfigType != null) {
-                            val factory = remoteConfigType.configurationFactories.firstOrNull()
-                            if (factory != null) {
-                                val settings = runManager.createConfiguration(
-                                    "Debug ${server.name}", factory
-                                )
-                                val remoteConfig = settings.configuration as? com.intellij.execution.remote.RemoteConfiguration
-                                if (remoteConfig != null) {
-                                    remoteConfig.HOST = "localhost"
-                                    remoteConfig.PORT = debugPort.toString()
-                                    val moduleManager = com.intellij.openapi.module.ModuleManager.getInstance(project)
-                                    val modules = moduleManager.modules
-                                    if (modules.isNotEmpty()) {
-                                        remoteConfig.setModule(modules.first())
-                                    }
-                                    settings.isTemporary = true
-                                    runManager.addConfiguration(settings)
-                                    runManager.selectedConfiguration = settings
-                                    com.intellij.execution.ProgramRunnerUtil.executeConfiguration(
-                                        settings,
-                                        com.intellij.execution.executors.DefaultDebugExecutor.getDebugExecutorInstance()
-                                    )
-                                    NotificationUtil.info(project, "Debugger attached to ${server.name} on port $debugPort. Server resuming...")
-                                }
-                            }
-                        }
-                    } catch (ex: Exception) {
-                        NotificationUtil.error(project, "Failed to attach debugger: ${ex.message}")
-                    }
-                }
-            }
+            // JPDA_SUSPEND=y — attach so the JVM can resume and hit startup breakpoints.
+            DebuggerAttachUtil.attachAfterDelay(project, server, debugPort)
         } catch (ex: Exception) {
             NotificationUtil.error(project, "Debug failed: ${ex.message}")
         }

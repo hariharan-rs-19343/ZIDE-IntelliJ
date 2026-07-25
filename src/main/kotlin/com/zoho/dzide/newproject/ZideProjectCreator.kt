@@ -2,9 +2,14 @@ package com.zoho.dzide.newproject
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
+import com.zoho.dzide.debug.DebuggerAttachUtil
 import com.zoho.dzide.settings.ZideSettingsState
 import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.zide.DeploymentConfigPatcher
@@ -19,10 +24,15 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
     private val log = Logger.getInstance(ZideProjectCreator::class.java)
 
-    fun create(indicator: ProgressIndicator) {
-        val projectDir = File(result.location, result.name)
+    /**
+     * @param existingProject when called from IntelliJ New Project wizard [setupProject],
+     *   pass the already-open project so we refresh it in place instead of openOrImport again.
+     */
+    fun create(indicator: ProgressIndicator, existingProject: Project? = null) {
+        val projectDir = resolveProjectDir(existingProject)
+        val workspaceDir = projectDir.parentFile ?: File(result.location)
         val deployServiceName = result.name
-        val deploymentDir = File(result.location, "deployment/$deployServiceName")
+        val deploymentDir = File(workspaceDir, "deployment/$deployServiceName")
 
         try {
             val startTime = System.currentTimeMillis()
@@ -30,14 +40,16 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
             // Step 1: Clone repository
             if (result.repositoryUrl.isNotBlank()) {
+                indicator.isIndeterminate = true
                 indicator.text = "Cloning repository..."
-                indicator.fraction = 0.05
                 cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
             } else {
                 indicator.text = "Creating project directory..."
                 indicator.fraction = 0.0
                 Files.createDirectories(projectDir.toPath())
             }
+            indicator.isIndeterminate = false
+            indicator.checkCanceled()
 
             // Step 4: Download or locate build
             val buildZip: Path? = when (result.buildType) {
@@ -131,7 +143,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             indicator.fraction = 0.58
             writeServiceXml(projectDir, deploymentDir, result)
 
-            // Step 7: Create zide_properties.xml with default deployment properties
+            // Step 7: Default zide_properties stub (Eclipse parent props finalized after hooks)
             indicator.text = "Writing deployment properties..."
             indicator.fraction = 0.60
             writeZidePropertiesXml(projectDir, result)
@@ -146,51 +158,111 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             indicator.fraction = 0.64
             createZideBuildStructure(projectDir, deploymentDir, result)
 
-            // Step 10: Run pre-creation + post-creation + zide-module hooks
+            // Step 10a: Pre-creation hooks only (Eclipse Service.create order)
             if (hasBuild) {
-                indicator.text = "Running ANT hooks..."
-                indicator.fraction = 0.68
-                runHooksIfAvailable(projectDir, deploymentDir, deployServiceName, indicator)
+                indicator.text = "Running pre-creation hook..."
+                indicator.fraction = 0.66
+                runHooksIfAvailable(projectDir, deploymentDir, deployServiceName, indicator, HookPhase.PRE)
             }
 
-            // Step 11: Show Deployment Properties dialog for user customization
+            // Step 10b: Configure IntelliJ module (natures/classpath equivalent)
+            indicator.text = "Configuring project module..."
+            indicator.fraction = 0.70
+            writeModuleIml(projectDir, deploymentDir, result)
+            writeModulesXml(projectDir, result)
+
+            // Step 10c: Post-creation + zide-module hooks
+            if (hasBuild) {
+                indicator.text = "Running post-creation hooks..."
+                indicator.fraction = 0.74
+                runHooksIfAvailable(projectDir, deploymentDir, deployServiceName, indicator, HookPhase.POST)
+            }
+
+            // Step 11: Deployment Properties dialog (Eclipse Finish equivalent)
             indicator.text = "Configuring deployment properties..."
-            indicator.fraction = 0.75
+            indicator.fraction = 0.78
+            indicator.text2 = ""
             ApplicationManager.getApplication().invokeAndWait {
                 showDeploymentProperties(projectDir, result)
             }
 
-            // Step 12: Run deployment config patching (server.xml, web.xml, etc.)
+            // Safe first-run hardcoded patch when DO_REPLACE is still false (before first start).
             if (hasBuild) {
-                indicator.text = "Patching deployment configs..."
-                indicator.fraction = 0.80
-                patchDeploymentConfigs(projectDir, deploymentDir)
+                indicator.text = "Applying initial deployment config patch..."
+                indicator.fraction = 0.82
+                runInitialConfigPatchIfNeeded(projectDir)
             }
 
-            // Step 13: Configure IntelliJ module (source roots + libraries)
-            indicator.text = "Configuring project module..."
-            indicator.fraction = 0.85
-            writeModuleIml(projectDir, deploymentDir, result)
-            writeModulesXml(projectDir, result)
-
-            // Step 14: Open project in IntelliJ
-            indicator.text = "Opening project..."
+            // Step 12: Register Tomcat on existing project, or open once for menu-dialog path.
+            indicator.text = if (existingProject != null) "Registering Tomcat server..." else "Opening project..."
             indicator.fraction = 0.90
-            ApplicationManager.getApplication().invokeLater {
-                com.intellij.ide.impl.ProjectUtil.openOrImport(projectDir.toPath(), null, true)
+            ApplicationManager.getApplication().invokeAndWait {
+                val targetProject = if (existingProject != null && !existingProject.isDisposed) {
+                    refreshProjectFiles(projectDir)
+                    existingProject
+                } else {
+                    com.intellij.ide.impl.ProjectUtil.openOrImport(projectDir.toPath(), null, true)
+                }
+                if (targetProject != null && !targetProject.isDisposed) {
+                    registerTomcatAndDependencies(targetProject, projectDir, deploymentDir, deployServiceName)
+                    if (result.startAfterCreate) {
+                        startServerAfterCreate(targetProject)
+                    }
+                } else {
+                    log.warn("No project available to register Tomcat after create")
+                }
             }
 
             val elapsed = System.currentTimeMillis() - startTime
             log.info("Service creation for ${result.serviceName} (${result.name}) completed in ${elapsed}ms")
             indicator.fraction = 1.0
+            indicator.text = "Project created"
+            indicator.text2 = ""
 
+        } catch (ex: ProcessCanceledException) {
+            log.info("ZIDE project creation cancelled: ${result.name}")
+            throw ex
         } catch (ex: Exception) {
             log.error("Failed to create ZIDE project: ${result.name}", ex)
-            rollback(projectDir, deploymentDir)
+            // Don't delete an already-open IDE wizard project directory aggressively if registration failed late
+            if (existingProject == null || existingProject.isDisposed) {
+                rollback(projectDir, deploymentDir)
+            }
             ApplicationManager.getApplication().invokeLater {
                 Messages.showErrorDialog("Failed to create project: ${ex.message}", "New ZIDE Project")
             }
         }
+    }
+
+    private fun resolveProjectDir(existingProject: Project?): File {
+        val basePath = existingProject?.basePath
+        if (!basePath.isNullOrBlank()) {
+            return File(basePath)
+        }
+        return File(result.location, result.name)
+    }
+
+    private fun refreshProjectFiles(projectDir: File) {
+        val vfs = LocalFileSystem.getInstance()
+        val virtualDir = vfs.refreshAndFindFileByIoFile(projectDir)
+        if (virtualDir != null) {
+            VfsUtil.markDirtyAndRefresh(false, true, true, virtualDir)
+        }
+    }
+
+    private fun runInitialConfigPatchIfNeeded(projectDir: File) {
+        val projectPath = projectDir.absolutePath
+        ZideConfigParser.clearCache(projectPath)
+        val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return
+        val serviceProps = zideConfig.service?.properties ?: return
+        if (!DeploymentConfigPatcher.shouldReplace(serviceProps, forceEveryStart = false)) return
+        val zideProps = zideConfig.properties?.properties ?: emptyMap()
+        val patchCtx = DeploymentConfigPatcher.buildPatchContext(serviceProps, zideProps) ?: return
+        val result = DeploymentConfigPatcher.patchAll(patchCtx)
+        if (result.errors.isNotEmpty()) {
+            log.warn("Initial config patch errors: ${result.errors.joinToString("; ")}")
+        }
+        // Leave DO_REPLACE=false so start-time replace/replacer still runs (Eclipse cold start).
     }
 
     private fun cloneRepository(repositoryUrl: String, branch: String, projectDir: File, indicator: ProgressIndicator) {
@@ -199,41 +271,74 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
         val branchArg = branch.ifBlank { "master" }
         indicator.text = "Cloning $repositoryUrl (branch: $branchArg)..."
+        indicator.text2 = "Starting git clone..."
 
-        // If the project directory already exists (created by IntelliJ wizard framework),
-        // remove it first so git clone can succeed
+        // Clear destination so git clone can succeed (wizard may have created an empty dir).
         if (projectDir.exists()) {
-            if (projectDir.list()?.isEmpty() != false) {
-                projectDir.delete()
-            } else {
-                projectDir.deleteRecursively()
-            }
+            projectDir.deleteRecursively()
         }
 
-        val cloneResult = ProcessUtil.executeCapturing(
-            command = listOf(gitPath, "clone", "-b", branchArg, repositoryUrl, projectDir.absolutePath),
-            timeoutMs = 600_000
+        val cloneResult = ProcessUtil.executeStreamingAndWait(
+            command = listOf(
+                gitPath, "clone", "--progress", "-b", branchArg,
+                repositoryUrl, projectDir.absolutePath
+            ),
+            timeoutMs = 600_000,
+            shouldCancel = {
+                try {
+                    indicator.checkCanceled()
+                    false
+                } catch (_: ProcessCanceledException) {
+                    true
+                }
+            },
+            onStdout = { chunk -> updateIndicatorProgressLine(indicator, chunk) },
+            onStderr = { chunk -> updateIndicatorProgressLine(indicator, chunk) }
         )
         if (cloneResult.exitCode != 0) {
-            throw RuntimeException("Git clone failed (exit code ${cloneResult.exitCode}): ${cloneResult.stderr}")
+            throw RuntimeException("Git clone failed (exit code ${cloneResult.exitCode}): ${cloneResult.stderr.takeLast(500)}")
         }
+        indicator.text2 = "Clone complete"
     }
 
     private fun downloadBuild(buildUrl: String, projectName: String, indicator: ProgressIndicator): Path? {
         val fileName = buildUrl.substringAfterLast('/').ifEmpty { "$projectName.zip" }
         val tempFile = Files.createTempFile("dzide-newproject-", "-$fileName")
 
+        indicator.isIndeterminate = true
         indicator.text = "Downloading $fileName..."
+        indicator.text2 = "Starting download..."
 
-        val wgetResult = ProcessUtil.executeCapturing(
-            command = listOf("wget", "--progress=dot", "-O", tempFile.toString(), buildUrl),
-            timeoutMs = 600_000
+        val wgetResult = ProcessUtil.executeStreamingAndWait(
+            command = listOf("wget", "--progress=dot:giga", "-O", tempFile.toString(), buildUrl),
+            timeoutMs = 600_000,
+            shouldCancel = {
+                try {
+                    indicator.checkCanceled()
+                    false
+                } catch (_: ProcessCanceledException) {
+                    true
+                }
+            },
+            onStdout = { chunk -> updateIndicatorProgressLine(indicator, chunk) },
+            onStderr = { chunk -> updateIndicatorProgressLine(indicator, chunk) }
         )
         if (wgetResult.exitCode != 0) {
             Files.deleteIfExists(tempFile)
             throw RuntimeException("Build download failed (exit code ${wgetResult.exitCode})")
         }
+        indicator.text2 = "Download complete"
+        indicator.isIndeterminate = false
         return tempFile
+    }
+
+    private fun updateIndicatorProgressLine(indicator: ProgressIndicator, chunk: String) {
+        val line = chunk.lineSequence()
+            .map { it.trim() }
+            .lastOrNull { it.isNotEmpty() }
+            ?: return
+        // Keep modal dialog readable — git progress often uses \r updates.
+        indicator.text2 = line.replace('\r', ' ').take(180)
     }
 
     private fun resolveGitExecutable(): String? {
@@ -321,7 +426,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             appendLine("""    <property name="ZIDE.PARENT_SERVICE" value="${result.name}"/>""")
             appendLine("""    <property name="ZIDE.DEPLOYMENT_FOLDER" value="$deployFolder"/>""")
             appendLine("""    <property name="ZIDE.DEPEND_SERVICES" value=""/>""")
-            appendLine("""    <property name="ZIDE.RUNNABLE_SERVICES" value=""/>""")
+            appendLine("""    <property name="ZIDE.RUNNABLE_SERVICES" value="${result.runnableServices}"/>""")
             appendLine("""    <property name="ZIDE.SUBMODULES" value=""/>""")
             appendLine("""    <property name="ZIDE.SERVICE_KEY" value="$serviceKey"/>""")
             appendLine("""    <property name="ZIDE.COLD_START" value="true"/>""")
@@ -330,7 +435,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             appendLine("""    <property name="ZIDE.SOURCES" value="src/main/java"/>""")
             appendLine("""    <property name="ZIDE.REPO_TYPE" value="2"/>""")
             appendLine("""    <property name="ZIDE.DEPLOY_TYPE" value="M19"/>""")
-            appendLine("""    <property name="ZIDE.MI_DEPLOYMENT" value="false"/>""")
+            appendLine("""    <property name="ZIDE.MI_DEPLOYMENT" value="${result.miDeployment}"/>""")
             appendLine("""    <property name="ZIDE.TOMCAT_VERSION" value="${detectTomcatVersion(deploymentDir)}"/>""")
             appendLine("""    <property name="ZIDE.PROJECT_JRE_HOME" value="${result.jdkHomePath}"/>""")
             appendLine("  </service>")
@@ -396,8 +501,8 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 jarFile.getInputStream(entry).use { props.load(it) }
                 jarFile.close()
                 val serverNumber = props.getProperty("server.number", "")
-                val parts = serverNumber.split(".")
-                return if (parts.size >= 2) "${parts[0]}.${parts[1]}" else serverNumber
+                // Eclipse stores the full catalina server.number (e.g. 9.0.120.0)
+                return serverNumber
             }
             jarFile.close()
         } catch (_: Exception) {}
@@ -424,7 +529,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             return
         }
 
-        val workspace = File(result.location)
+        val workspace = projectDir.parentFile ?: File(result.location)
         val hgUtilsSource = resolveHgUtilsSource(workspace, projectDir)
 
         if (hgUtilsSource != null) {
@@ -648,7 +753,15 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         File(zideHookDir, "buildlogs").mkdirs()
     }
 
-    private fun runHooksIfAvailable(projectDir: File, deploymentDir: File, serviceName: String, indicator: ProgressIndicator) {
+    private enum class HookPhase { PRE, POST }
+
+    private fun runHooksIfAvailable(
+        projectDir: File,
+        deploymentDir: File,
+        serviceName: String,
+        indicator: ProgressIndicator,
+        phase: HookPhase
+    ) {
         val antHome = com.zoho.dzide.deploysync.AntResolver.resolveAntHome(projectDir.absolutePath, null)
             ?: return
         val antExec = com.zoho.dzide.deploysync.AntResolver.resolveAntExecutable(antHome)
@@ -661,14 +774,31 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
         val hookRuns = mutableListOf<HookRun>()
 
-        if (File(zideHookDir, "build.xml").exists()) {
-            hookRuns.add(HookRun("precreationhook", "precreation", zideHookDir, "Running pre-creation hook (zide_hook)..."))
+        when (phase) {
+            HookPhase.PRE -> {
+                if (File(zideHookDir, "build.xml").exists()) {
+                    hookRuns.add(HookRun("precreationhook", "precreation", zideHookDir, "Running pre-creation hook (zide_hook)..."))
+                }
+            }
+            HookPhase.POST -> {
+                if (File(zideBuildDir, "build.xml").exists()) {
+                    hookRuns.add(HookRun("postservicetarget", "postcreation", zideBuildDir, "Running post-creation hook (zide_build)..."))
+                }
+                if (File(zideHookDir, "build.xml").exists()) {
+                    hookRuns.add(HookRun("zidemodulehook", "zideoperations", zideHookDir, "Running zide module hook (zide_hook)..."))
+                }
+            }
         }
-        if (File(zideBuildDir, "build.xml").exists()) {
-            hookRuns.add(HookRun("postcreationhook", "postcreation", zideBuildDir, "Running post-creation hook (zide_build)..."))
-        }
-        if (File(zideHookDir, "build.xml").exists()) {
-            hookRuns.add(HookRun("zidemodulehook", "zideoperations", zideHookDir, "Running zide module hook (zide_hook)..."))
+
+        // Pass available ZIDE.* props into ANT (Eclipse AntHookRunner parity)
+        val zideConfig = ZideConfigParser.readZideConfig(projectDir.absolutePath)
+        val antPropArgs = mutableListOf<String>()
+        val allProps = (zideConfig?.service?.properties ?: emptyMap()) +
+            (zideConfig?.properties?.properties ?: emptyMap())
+        for ((k, v) in allProps) {
+            if (k.startsWith("ZIDE") && v.isNotBlank()) {
+                antPropArgs.add("-D$k=$v")
+            }
         }
 
         for (hookRun in hookRuns) {
@@ -676,15 +806,25 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             if (!buildXml.exists()) continue
 
             indicator.text = hookRun.message
+            // zide_hook uses clone dispatcher; zide_build exposes named targets directly (postservicetarget)
+            val usesCloneDispatcher = File(hookRun.baseDir, "build.xml").readText().contains("""name="clone"""")
+            val cmdParts = mutableListOf(
+                "\"$antExec\"", "-f", "\"${buildXml.absolutePath}\"",
+                "-Dbasedir=\"${hookRun.baseDir.absolutePath}\""
+            )
+            if (usesCloneDispatcher) {
+                cmdParts.add("clone")
+                cmdParts.add("-Dtarget=${hookRun.target}")
+            } else {
+                cmdParts.add(hookRun.target)
+            }
+            cmdParts.add("-DREPOSITORY_PATH=${projectDir.absolutePath}")
+            cmdParts.add("-DDEPLOYMENT_PATH=$deploymentPath")
+            cmdParts.add("-DZIDE.PARENT_SERVICE=$serviceName")
+            cmdParts.addAll(antPropArgs)
+
             val hookResult = ProcessUtil.executeCapturing(
-                command = com.zoho.dzide.util.ShellUtil.buildShellCommand(
-                    "\"$antExec\"", "-f", "\"${buildXml.absolutePath}\"",
-                    "-Dbasedir=\"${hookRun.baseDir.absolutePath}\"", "clone",
-                    "-Dtarget=${hookRun.target}",
-                    "-DREPOSITORY_PATH=${projectDir.absolutePath}",
-                    "-DDEPLOYMENT_PATH=$deploymentPath",
-                    "-DZIDE.PARENT_SERVICE=$serviceName"
-                ),
+                command = com.zoho.dzide.util.ShellUtil.buildShellCommand(*cmdParts.toTypedArray()),
                 workingDir = projectDir.absolutePath,
                 timeoutMs = 300_000
             )
@@ -706,6 +846,77 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         }
     }
 
+    private fun registerTomcatAndDependencies(
+        project: com.intellij.openapi.project.Project,
+        projectDir: File,
+        deploymentDir: File,
+        deployServiceName: String
+    ) {
+        try {
+            val server = com.zoho.dzide.zide.ZideSetupWizard.createServerFromConfig(
+                project, projectDir.absolutePath, interactive = false
+            ) ?: return
+            val provider = com.zoho.dzide.tomcat.TomcatServerProvider.getInstance(project)
+            if (provider.getServers().none { it.path == server.path }) {
+                provider.addServer(server)
+                provider.setProjectMapping(
+                    com.zoho.dzide.model.ProjectServerMapping(
+                        projectPath = projectDir.absolutePath,
+                        serverId = server.id,
+                        contextPath = "/",
+                        warFilePath = null
+                    )
+                )
+                log.info("Auto-registered Tomcat server '${server.name}'")
+            }
+
+            val module = com.intellij.openapi.module.ModuleManager.getInstance(project).modules.firstOrNull()
+            if (module != null) {
+                val webapp = File(deploymentDir, "AdventNet/Sas/tomcat/webapps/$deployServiceName")
+                if (webapp.exists()) {
+                    com.zoho.dzide.dependency.DependencyLinker(project)
+                        .linkDeploymentLibraries(webapp.absolutePath, module)
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("Failed to auto-register Tomcat / link dependencies", e)
+        }
+    }
+
+    private fun startServerAfterCreate(project: Project) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                val provider = com.zoho.dzide.tomcat.TomcatServerProvider.getInstance(project)
+                val server = provider.getServers().firstOrNull()
+                if (server == null) {
+                    ApplicationManager.getApplication().invokeLater {
+                        if (!project.isDisposed) {
+                            com.zoho.dzide.util.NotificationUtil.error(
+                                project,
+                                "Start after create failed: Tomcat server was not registered."
+                            )
+                        }
+                    }
+                    return@executeOnPooledThread
+                }
+                val debugPort = com.zoho.dzide.util.PortUtil.findAvailablePort(8000)
+                com.zoho.dzide.tomcat.TomcatManager.getInstance(project).startServerInDebug(server, debugPort)
+                // JPDA_SUSPEND=y — must attach or the JVM stays halted.
+                DebuggerAttachUtil.attachAfterDelay(project, server, debugPort)
+            } catch (e: Exception) {
+                log.warn("Start after create failed", e)
+                ApplicationManager.getApplication().invokeLater {
+                    if (!project.isDisposed) {
+                        com.zoho.dzide.util.NotificationUtil.error(
+                            project,
+                            "Start after create failed: ${e.message}"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun showDeploymentProperties(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
         val projectPath = projectDir.absolutePath
         val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return
@@ -723,21 +934,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         }
     }
 
-    private fun patchDeploymentConfigs(projectDir: File, deploymentDir: File) {
-        val zideConfig = ZideConfigParser.readZideConfig(projectDir.absolutePath) ?: return
-        val service = zideConfig.service ?: return
-        val properties = zideConfig.properties ?: return
-
-        val patchCtx = DeploymentConfigPatcher.buildPatchContext(
-            serviceProps = service.properties,
-            zideProps = properties.properties
-        ) ?: return
-
-        val patchResult = DeploymentConfigPatcher.patchAll(patchCtx)
-        if (patchResult.errors.isNotEmpty()) {
-            log.warn("Deployment config patching had errors: ${patchResult.errors.joinToString("; ")}")
-        }
-    }
+    // Create-time hardcoded patch removed — Eclipse applies replace at launch (DO_REPLACE).
 
     private fun writeModuleIml(projectDir: File, deploymentDir: File, result: ZideProjectWizardDialog.WizardResult) {
         val moduleName = result.name

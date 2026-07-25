@@ -37,8 +37,12 @@ class ZideProjectWizardDialog(
     private val branchField = JBTextField("master")
     private val remoteBuildRadio = JRadioButton("Remote Build", true)
     private val localBuildRadio = JRadioButton("Local Build")
+    private val productUrlRadio = JRadioButton("Product Download URL")
     private val buildUrlField = JBTextField()
     private val buildFileField = TextFieldWithBrowseButton()
+    private val miDeployCheckBox = JBCheckBox("MI deployment", false)
+    private val startAfterCreateCheckBox = JBCheckBox("Start server after create (debug)", false)
+    private val runnableServicesField = JBTextField()
     private val serviceErrorLabel = JBLabel("Service is required").apply { foreground = JBColor.RED; isVisible = false }
     private val buildErrorLabel = JBLabel("Build URL or file is required").apply { foreground = JBColor.RED; isVisible = false }
 
@@ -193,6 +197,7 @@ class ZideProjectWizardDialog(
 
         // Build Type radio buttons
         val buildTypeGroup = ButtonGroup()
+        buildTypeGroup.add(productUrlRadio)
         buildTypeGroup.add(remoteBuildRadio)
         buildTypeGroup.add(localBuildRadio)
 
@@ -201,14 +206,16 @@ class ZideProjectWizardDialog(
         panel.add(JLabel("Build Type:"), gbc)
         gbc.gridx = 1; gbc.weightx = 1.0
         val buildTypePanel = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0)).apply {
+            add(productUrlRadio)
+            add(javax.swing.Box.createHorizontalStrut(8))
             add(remoteBuildRadio)
-            add(javax.swing.Box.createHorizontalStrut(12))
+            add(javax.swing.Box.createHorizontalStrut(8))
             add(localBuildRadio)
         }
         panel.add(buildTypePanel, gbc)
         row++
 
-        // Build URL (visible for Remote)
+        // Build URL (visible for Remote / Product URL)
         gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
         gbc.insets = Insets(8, 8, 2, 8)
         val buildUrlLabel = JLabel("Build URL:")
@@ -238,23 +245,58 @@ class ZideProjectWizardDialog(
         panel.add(buildErrorLabel, gbc)
         row++
 
+        // MI + start after create
+        gbc.gridx = 1; gbc.gridy = row; gbc.weightx = 1.0
+        gbc.insets = Insets(4, 8, 4, 8)
+        val optionsPanel = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0)).apply {
+            add(miDeployCheckBox)
+            add(javax.swing.Box.createHorizontalStrut(16))
+            add(startAfterCreateCheckBox)
+        }
+        panel.add(optionsPanel, gbc)
+        row++
+
+        // Runnable services
+        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
+        gbc.insets = Insets(8, 8, 2, 8)
+        panel.add(JLabel("Runnable services:"), gbc)
+        gbc.gridx = 1; gbc.weightx = 1.0
+        panel.add(runnableServicesField, gbc)
+        row++
+        gbc.gridx = 1; gbc.gridy = row; gbc.weightx = 1.0
+        gbc.insets = Insets(0, 8, 8, 8)
+        panel.add(JBLabel("<html><small>Comma-separated service keys (optional)</small></html>"), gbc)
+        row++
+
         // Toggle visibility based on radio selection
+        fun refreshBuildUi() {
+            val isLocal = localBuildRadio.isSelected
+            val isProduct = productUrlRadio.isSelected
+            buildUrlLabel.isVisible = !isLocal
+            buildUrlField.isVisible = !isLocal
+            buildFileLabel.isVisible = isLocal
+            buildFileField.isVisible = isLocal
+            if (isProduct) {
+                val product = getSelectedProduct()
+                if (!product?.downloadUrl.isNullOrBlank()) {
+                    buildUrlField.text = product!!.downloadUrl
+                }
+            }
+        }
         buildFileLabel.isVisible = false
         buildFileField.isVisible = false
-        remoteBuildRadio.addActionListener {
-            buildUrlLabel.isVisible = true; buildUrlField.isVisible = true
-            buildFileLabel.isVisible = false; buildFileField.isVisible = false
-        }
-        localBuildRadio.addActionListener {
-            buildUrlLabel.isVisible = false; buildUrlField.isVisible = false
-            buildFileLabel.isVisible = true; buildFileField.isVisible = true
+        productUrlRadio.addActionListener { refreshBuildUi() }
+        remoteBuildRadio.addActionListener { refreshBuildUi() }
+        localBuildRadio.addActionListener { refreshBuildUi() }
+        serviceCombo.addActionListener {
+            if (productUrlRadio.isSelected) refreshBuildUi()
         }
 
         // Filler
         gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.weighty = 1.0
         panel.add(JPanel(), gbc)
 
-        panel.preferredSize = Dimension(550, panel.preferredSize.height)
+        panel.preferredSize = Dimension(620, panel.preferredSize.height + 80)
         return panel
     }
 
@@ -295,7 +337,7 @@ class ZideProjectWizardDialog(
         }
         serviceErrorLabel.isVisible = false
 
-        if (remoteBuildRadio.isSelected && buildUrlField.text.trim().isBlank()) {
+        if ((remoteBuildRadio.isSelected || productUrlRadio.isSelected) && buildUrlField.text.trim().isBlank()) {
             buildErrorLabel.text = "Build URL is required"
             buildErrorLabel.isVisible = true
             return ValidationInfo("Build URL is required", buildUrlField)
@@ -358,25 +400,37 @@ class ZideProjectWizardDialog(
         val localBuildPath: String,
         val repositoryUrl: String,
         val serviceName: String,
-        val downloadUrl: String
+        val downloadUrl: String,
+        val miDeployment: Boolean = false,
+        val startAfterCreate: Boolean = false,
+        val runnableServices: String = ""
     )
 
     fun getResult(): WizardResult {
         val product = getSelectedProduct()
         val selectedJdkName = jdkCombo.selectedItem as? String ?: ""
         val jdkHome = resolveJdkHomePath(selectedJdkName)
+        val isLocal = localBuildRadio.isSelected
+        val buildUrl = when {
+            isLocal -> ""
+            productUrlRadio.isSelected -> buildUrlField.text.trim().ifBlank { product?.downloadUrl ?: "" }
+            else -> buildUrlField.text.trim()
+        }
         return WizardResult(
             name = nameField.text.trim(),
             location = locationField.text.trim(),
             jdk = selectedJdkName,
             jdkHomePath = jdkHome,
             branch = branchField.text.trim(),
-            buildType = if (remoteBuildRadio.isSelected) "remote" else "local",
-            buildUrl = buildUrlField.text.trim(),
+            buildType = if (isLocal) "local" else "remote",
+            buildUrl = buildUrl,
             localBuildPath = buildFileField.text.trim(),
             repositoryUrl = product?.repositoryUrl ?: "",
             serviceName = product?.name ?: "",
-            downloadUrl = product?.downloadUrl ?: ""
+            downloadUrl = product?.downloadUrl ?: "",
+            miDeployment = miDeployCheckBox.isSelected,
+            startAfterCreate = startAfterCreateCheckBox.isSelected,
+            runnableServices = runnableServicesField.text.trim()
         )
     }
 

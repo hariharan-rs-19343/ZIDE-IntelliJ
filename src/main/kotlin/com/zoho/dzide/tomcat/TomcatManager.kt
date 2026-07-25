@@ -119,12 +119,18 @@ class TomcatManager(private val project: Project) : Disposable {
     }
 
     @Suppress("UNUSED_PARAMETER")
-    fun patchDeploymentConfigs(server: TomcatServer) {
+    fun patchDeploymentConfigs(server: TomcatServer, force: Boolean = false) {
         val projectPath = project.basePath ?: return
         ZideConfigParser.clearCache(projectPath)
         val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return
         val serviceProps = zideConfig.service?.properties ?: return
         val zideProps = zideConfig.properties?.properties ?: emptyMap()
+
+        val forceEveryStart = force || com.zoho.dzide.settings.ZideSettingsState.getInstance().replacerEveryStart
+        if (!DeploymentConfigPatcher.shouldReplace(serviceProps, forceEveryStart)) {
+            log("Skipping config patching: ZIDE.DO_REPLACE=true (already applied).")
+            return
+        }
 
         val patchCtx = DeploymentConfigPatcher.buildPatchContext(serviceProps, zideProps)
         if (patchCtx == null) {
@@ -132,22 +138,39 @@ class TomcatManager(private val project: Project) : Disposable {
             return
         }
 
-        log("Patching deployment configs for ${patchCtx.parentService}...")
-        val result = DeploymentConfigPatcher.patchAll(patchCtx, project)
+        // Prefer product install.xml / install.properties; fall back to hardcoded patcher.
+        val replacerResult = com.zoho.dzide.config.replacer.ConfigReplacerRunner.run(
+            projectPath = projectPath,
+            deploymentFolder = patchCtx.deploymentFolder,
+            serviceProps = serviceProps,
+            zideProps = zideProps,
+            branch = serviceProps["ZIDE.REPOSITORY_TRUNK"] ?: "default"
+        )
 
-        if (result.serverXmlPatched) log("  Patched server.xml (Context element, shutdown port)")
-        if (result.webXmlPatched) log("  Patched web.xml (JSP servlet for dynamic compilation)")
-        if (result.persistencePatched) log("  Patched persistence-configurations.xml (DBName, DSAdapter, StartDBServer)")
-        if (result.securityPatched) log("  Patched security-properties.xml (IAM server, service name, logout URL)")
-        if (result.configPropertiesPatched) log("  Patched configuration.properties (DB driver, URL, port, vendor, credentials)")
-        if (result.httpsConnectorPatched) log("  Patched HTTPS Connector (port 8443, SSL keystore)")
-        if (result.keystoreDownloaded) log("  Downloaded sas.keystore to tomcat/conf/")
-        for (err in result.errors) {
-            logError("  Patch error: $err")
+        if (replacerResult.applied) {
+            log("Applied data-driven config replacements (${replacerResult.filesTouched} file(s)).")
+            for (msg in replacerResult.messages) log("  $msg")
+        } else {
+            log("Patching deployment configs for ${patchCtx.parentService}...")
+            val result = DeploymentConfigPatcher.patchAll(patchCtx, project)
+            if (result.skipped) {
+                log("  Skipping config patching: ZIDE.DO_REPLACE=true (already applied).")
+                return
+            }
+            if (result.serverXmlPatched) log("  Patched server.xml (Context, shutdown port, HTTP port)")
+            if (result.webXmlPatched) log("  Patched web.xml (JSP servlet for dynamic compilation)")
+            if (result.persistencePatched) log("  Patched persistence-configurations.xml (DBName, DSAdapter, StartDBServer)")
+            if (result.securityPatched) log("  Patched security-properties.xml (IAM server, service name, logout URL)")
+            if (result.configPropertiesPatched) log("  Patched configuration.properties (DB driver, URL, port, vendor, credentials)")
+            for (err in result.errors) {
+                logError("  Patch error: $err")
+            }
+            if (!result.serverXmlPatched && !result.webXmlPatched && !result.persistencePatched && !result.securityPatched && !result.configPropertiesPatched && result.errors.isEmpty()) {
+                log("  Config files already up to date.")
+            }
         }
-        if (!result.serverXmlPatched && !result.webXmlPatched && !result.persistencePatched && !result.securityPatched && !result.configPropertiesPatched && result.errors.isEmpty()) {
-            log("  Config files already up to date.")
-        }
+
+        ZideConfigParser.setServiceProperty(projectPath, "ZIDE.DO_REPLACE", "true")
     }
 
     /**

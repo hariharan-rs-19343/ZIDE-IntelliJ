@@ -22,7 +22,9 @@ class ZideSettingsState : PersistentStateComponent<ZideSettingsState.State> {
         var gitPath: String = "",
         var gitUsername: String = "",
         var zohoRepoUsername: String = "",
-        var customBuildUrl: String = ""
+        var customBuildUrl: String = "",
+        /** Eclipse zide.pref.need_replacer_everystart — when true, config replace runs every start. */
+        var replacerEveryStart: Boolean = true
     )
 
     private var myState = State()
@@ -56,6 +58,10 @@ class ZideSettingsState : PersistentStateComponent<ZideSettingsState.State> {
     var customBuildUrl: String
         get() = myState.customBuildUrl
         set(value) { myState.customBuildUrl = value }
+
+    var replacerEveryStart: Boolean
+        get() = myState.replacerEveryStart
+        set(value) { myState.replacerEveryStart = value }
 
     fun getPassword(key: String): String {
         val attributes = credentialAttributes(key)

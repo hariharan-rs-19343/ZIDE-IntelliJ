@@ -302,30 +302,43 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                         }
 
                         ConsoleUtil.print(console, project, "[6/6] Patching deployment config files...\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                        ZideConfigParser.setServiceProperty(repositoryPath, "ZIDE.DO_REPLACE", "false")
+                        ZideConfigParser.clearCache(repositoryPath)
+                        val refreshed = ZideConfigParser.readZideConfig(repositoryPath)
                         val patchCtx = DeploymentConfigPatcher.buildPatchContext(
-                            zideConfig.service?.properties ?: emptyMap(),
-                            zideProps
+                            refreshed?.service?.properties ?: emptyMap(),
+                            refreshed?.properties?.properties ?: zideProps
                         )
                         if (patchCtx != null) {
-                            val patchResult = DeploymentConfigPatcher.patchAll(patchCtx, project)
-                            if (patchResult.serverXmlPatched)
-                                ConsoleUtil.print(console, project, "  Patched server.xml (Context element, shutdown port)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            if (patchResult.webXmlPatched)
-                                ConsoleUtil.print(console, project, "  Patched web.xml (JSP servlet for dynamic compilation)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            if (patchResult.persistencePatched)
-                                ConsoleUtil.print(console, project, "  Patched persistence-configurations.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            if (patchResult.securityPatched)
-                                ConsoleUtil.print(console, project, "  Patched security-properties.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            if (patchResult.httpsConnectorPatched)
-                                ConsoleUtil.print(console, project, "  Patched HTTPS Connector (port 8443, SSL keystore)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            if (patchResult.keystoreDownloaded)
-                                ConsoleUtil.print(console, project, "  Downloaded sas.keystore to tomcat/conf/\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            for (err in patchResult.errors) {
-                                ConsoleUtil.print(console, project, "  Patch error: $err\n", ConsoleViewContentType.ERROR_OUTPUT)
+                            val replacerResult = com.zoho.dzide.config.replacer.ConfigReplacerRunner.run(
+                                projectPath = repositoryPath,
+                                deploymentFolder = patchCtx.deploymentFolder,
+                                serviceProps = refreshed?.service?.properties ?: emptyMap(),
+                                zideProps = refreshed?.properties?.properties ?: zideProps,
+                                branch = refreshed?.service?.properties?.get("ZIDE.REPOSITORY_TRUNK") ?: "default"
+                            )
+                            if (replacerResult.applied) {
+                                ConsoleUtil.print(console, project, "  Applied data-driven replacements (${replacerResult.filesTouched} file(s)).\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                            } else {
+                                val patchResult = DeploymentConfigPatcher.patchAll(patchCtx, project)
+                                if (patchResult.serverXmlPatched)
+                                    ConsoleUtil.print(console, project, "  Patched server.xml (Context, shutdown port, HTTP port)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                if (patchResult.webXmlPatched)
+                                    ConsoleUtil.print(console, project, "  Patched web.xml (JSP servlet for dynamic compilation)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                if (patchResult.persistencePatched)
+                                    ConsoleUtil.print(console, project, "  Patched persistence-configurations.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                if (patchResult.securityPatched)
+                                    ConsoleUtil.print(console, project, "  Patched security-properties.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                if (patchResult.configPropertiesPatched)
+                                    ConsoleUtil.print(console, project, "  Patched configuration.properties\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                for (err in patchResult.errors) {
+                                    ConsoleUtil.print(console, project, "  Patch error: $err\n", ConsoleViewContentType.ERROR_OUTPUT)
+                                }
+                                if (!patchResult.serverXmlPatched && !patchResult.webXmlPatched && !patchResult.persistencePatched && !patchResult.securityPatched && !patchResult.configPropertiesPatched && patchResult.errors.isEmpty()) {
+                                    ConsoleUtil.print(console, project, "  Config files already up to date.\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                }
                             }
-                            if (!patchResult.serverXmlPatched && !patchResult.webXmlPatched && !patchResult.persistencePatched && !patchResult.securityPatched && patchResult.errors.isEmpty()) {
-                                ConsoleUtil.print(console, project, "  Config files already up to date.\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            }
+                            ZideConfigParser.setServiceProperty(repositoryPath, "ZIDE.DO_REPLACE", "true")
                         } else {
                             ConsoleUtil.print(console, project, "  Skipped: missing DEPLOYMENT_FOLDER or PARENT_SERVICE.\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
                         }

@@ -30,6 +30,10 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
     private val buildTypeProperty: GraphProperty<String> = propertyGraph.property("remote")
     private val buildUrlProperty: GraphProperty<String> = propertyGraph.property("")
     private val localBuildPathProperty: GraphProperty<String> = propertyGraph.property("")
+    private val useProductUrlProperty: GraphProperty<Boolean> = propertyGraph.property(false)
+    private val miDeploymentProperty: GraphProperty<Boolean> = propertyGraph.property(false)
+    private val startAfterCreateProperty: GraphProperty<Boolean> = propertyGraph.property(false)
+    private val runnableServicesProperty: GraphProperty<String> = propertyGraph.property("")
 
     private var products = listOf<CmToolApiClient.Product>()
     private val serviceModel = DefaultComboBoxModel<String>()
@@ -90,6 +94,20 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
                     .bind(buildTypeProperty)
             }
 
+            row {
+                checkBox("Use product download URL")
+                    .bindSelected(useProductUrlProperty)
+                    .onChanged {
+                        if (useProductUrlProperty.get()) {
+                            val clean = serviceProperty.get().removePrefix("★ ").trim()
+                            val product = products.find { it.name == clean }
+                            if (!product?.downloadUrl.isNullOrBlank()) {
+                                buildUrlProperty.set(product!!.downloadUrl)
+                            }
+                        }
+                    }
+            }.visibleIf(buildTypeProperty.equalsTo("remote"))
+
             row("Build URL:") {
                 textField()
                     .bindText(buildUrlProperty)
@@ -115,6 +133,20 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
                     }
             }.visibleIf(buildTypeProperty.equalsTo("local"))
 
+            row {
+                checkBox("MI deployment")
+                    .bindSelected(miDeploymentProperty)
+                checkBox("Start server after create (debug)")
+                    .bindSelected(startAfterCreateProperty)
+            }
+
+            row("Runnable services:") {
+                textField()
+                    .bindText(runnableServicesProperty)
+                    .columns(COLUMNS_MEDIUM)
+                comment("Comma-separated service keys (optional)")
+            }
+
 
         }
     }
@@ -139,19 +171,25 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
             jdkHomePath = selectedJdkHome,
             branch = branchProperty.get(),
             buildType = buildTypeProperty.get(),
-            buildUrl = buildUrlProperty.get(),
+            buildUrl = if (useProductUrlProperty.get() && buildUrlProperty.get().isBlank()) {
+                selectedProduct?.downloadUrl ?: ""
+            } else buildUrlProperty.get(),
             localBuildPath = localBuildPathProperty.get(),
             repositoryUrl = selectedProduct?.repositoryUrl ?: "",
             serviceName = selectedProduct?.name ?: "",
             downloadUrl = selectedProduct?.downloadUrl ?: "",
-
+            miDeployment = miDeploymentProperty.get(),
+            startAfterCreate = startAfterCreateProperty.get(),
+            runnableServices = runnableServicesProperty.get().trim()
         )
 
         val creator = ZideProjectCreator(wizardResult)
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Creating ZIDE Project: $projectName", true) {
+        // Modal dialog so clone/download progress is visible; pass existing project to avoid
+        // delete + openOrImport race with the wizard-created project.
+        ProgressManager.getInstance().run(object : Task.Modal(project, "Creating ZIDE Project: $projectName", true) {
             override fun run(indicator: ProgressIndicator) {
-                creator.create(indicator)
+                creator.create(indicator, existingProject = project)
             }
         })
     }

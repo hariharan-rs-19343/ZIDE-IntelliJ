@@ -15,16 +15,24 @@ import kotlin.io.path.exists
 object ZideSetupWizard {
 
     fun runZideSetupWizard(project: Project, projectPath: String): TomcatServer? {
+        return createServerFromConfig(project, projectPath, interactive = true)
+    }
+
+    /**
+     * Builds a [TomcatServer] from `.zide_resources` without requiring Add Server UI.
+     * When [interactive] is false, skips service picker / folder prompts (auto-create path).
+     */
+    fun createServerFromConfig(project: Project, projectPath: String, interactive: Boolean = true): TomcatServer? {
         val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return null
 
         val (services, service, properties, serviceOptions) = zideConfig
         if (service == null || properties == null) {
-            NotificationUtil.error(project, "Failed to parse ZIDE configuration files.")
+            if (interactive) NotificationUtil.error(project, "Failed to parse ZIDE configuration files.")
             return null
         }
 
         var selectedService = service
-        if (serviceOptions.size > 1) {
+        if (interactive && serviceOptions.size > 1) {
             val selectedKey = showServiceSelector(project, serviceOptions) ?: return null
             selectedService = services.find { it.key == selectedKey }
                 ?: services.find { it.key == "ROOT" }
@@ -54,7 +62,7 @@ object ZideSetupWizard {
             )
         }
 
-        if (moduleZideProps == null && repositoryModuleDir != null) {
+        if (interactive && moduleZideProps == null && repositoryModuleDir != null) {
             val pickedFolder = askUserForZideFolder(project, projectPath)
             if (pickedFolder != null) {
                 zideFolderPath = pickedFolder
@@ -74,14 +82,14 @@ object ZideSetupWizard {
         }
 
         if (tomcatPath == null) {
-            NotificationUtil.error(project, "ZIDE.DEPLOYMENT_FOLDER not found in service.xml configuration.")
+            if (interactive) NotificationUtil.error(project, "ZIDE.DEPLOYMENT_FOLDER not found in service.xml configuration.")
             return null
         }
 
         val catalinaScript = Path.of(tomcatPath, "bin",
             if (com.zoho.dzide.util.ShellUtil.isWindows) "catalina.bat" else "catalina.sh")
         if (!catalinaScript.exists()) {
-            NotificationUtil.error(project, "Invalid Tomcat path: $tomcatPath\n\nEnsure it contains bin/catalina.sh")
+            if (interactive) NotificationUtil.error(project, "Invalid Tomcat path: $tomcatPath\n\nEnsure it contains bin/catalina.sh")
             return null
         }
 

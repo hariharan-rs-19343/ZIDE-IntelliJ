@@ -236,4 +236,25 @@ object ZideConfigParser {
         propertiesXmlPath.writeText(content)
         inMemoryCache.remove(projectPath)
     }
+
+    /** Updates a property in `.zide_resources/service.xml` (e.g. ZIDE.DO_REPLACE). */
+    fun setServiceProperty(projectPath: String, propertyName: String, value: String) {
+        val serviceXmlPath = Path.of(projectPath, ".zide_resources", "service.xml")
+        if (!serviceXmlPath.exists()) return
+
+        var content = serviceXmlPath.readText()
+        val regex = Regex("""(<property\s+name="${Regex.escape(propertyName)}"\s+value=")[^"]*("\s*/>)""")
+        if (regex.containsMatchIn(content)) {
+            content = regex.replace(content, "$1${Regex.escapeReplacement(value)}$2")
+        } else {
+            val serviceCloseTag = "</service>"
+            val insertionPoint = content.lastIndexOf(serviceCloseTag)
+            if (insertionPoint >= 0) {
+                val line = """    <property name="$propertyName" value="${value.replace("\"", "&quot;")}"/>"""
+                content = content.substring(0, insertionPoint) + line + "\n" + content.substring(insertionPoint)
+            }
+        }
+        serviceXmlPath.writeText(content)
+        inMemoryCache.remove(projectPath)
+    }
 }

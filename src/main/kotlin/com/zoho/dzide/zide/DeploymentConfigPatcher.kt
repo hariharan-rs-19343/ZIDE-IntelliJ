@@ -1,24 +1,23 @@
 package com.zoho.dzide.zide
 
 import com.intellij.openapi.project.Project
-import com.zoho.dzide.util.NotificationUtil
-import java.net.HttpURLConnection
-import java.net.URL
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 /**
- * Patches deployment config files to replicate what Eclipse ZIDE does during server setup.
+ * Hardcoded deployment config patches (interim until data-driven Replacer).
  *
- * Eclipse uses pgsql_replace.xml / mysql_replace.xml (from the zide config repo) to patch:
- * 1. configuration.properties — DB driver, URL, port, vendor, credentials, schema
+ * Matches Eclipse ZIDE non-SSL setup behavior. Does NOT download or replace
+ * sas.keystore, and does NOT inject an HTTPS Connector — those belong to the
+ * App. Server / deployment container (Eclipse-aligned).
+ *
+ * Patches:
+ * 1. configuration.properties — DB driver, URL, port, vendor, credentials, schema, http.port
  * 2. persistence-configurations.xml — DBName, DSAdapter, StartDBServer
  * 3. security-properties.xml — IAM server, service name, logout page
- * 4. server.xml — Context element, shutdown port
+ * 4. server.xml — Context element, shutdown port, deployOnStartup, HTTP Connector port
  * 5. web.xml — JSP servlet for dynamic compilation
  */
 object DeploymentConfigPatcher {
@@ -29,6 +28,7 @@ object DeploymentConfigPatcher {
         val iamServer: String?,
         val iamServiceName: String?,
         val hostName: String?,
+        val httpPort: String? = null,
         val httpsPort: String?,
         val dbType: String?,
         val dbName: String?,
@@ -46,8 +46,7 @@ object DeploymentConfigPatcher {
         val persistencePatched: Boolean = false,
         val securityPatched: Boolean = false,
         val configPropertiesPatched: Boolean = false,
-        val httpsConnectorPatched: Boolean = false,
-        val keystoreDownloaded: Boolean = false,
+        val skipped: Boolean = false,
         val errors: List<String> = emptyList()
     )
 
@@ -58,12 +57,7 @@ object DeploymentConfigPatcher {
         val persistenceOk = try { patchPersistenceConfig(ctx) } catch (e: Exception) { errors.add("persistence-configurations.xml: ${e.message}"); false }
         val securityOk = try { patchSecurityProperties(ctx) } catch (e: Exception) { errors.add("security-properties.xml: ${e.message}"); false }
         val configPropsOk = try { patchConfigurationProperties(ctx) } catch (e: Exception) { errors.add("configuration.properties: ${e.message}"); false }
-        // Disabled: SSL keystore download and HTTPS connector patching
-        // val httpsOk = try { patchHttpsConnector(ctx) } catch (e: Exception) { errors.add("HTTPS connector: ${e.message}"); false }
-        // val keystoreOk = try { downloadKeystoreFile(ctx.deploymentFolder, project) } catch (e: Exception) { errors.add("sas.keystore: ${e.message}"); false }
-        val httpsOk = false
-        val keystoreOk = false
-        return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, configPropsOk, httpsOk, keystoreOk, errors)
+        return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, configPropsOk, skipped = false, errors)
     }
 
     fun patchServerXml(ctx: PatchContext): Boolean {
@@ -98,65 +92,24 @@ object DeploymentConfigPatcher {
             modified = true
         }
 
+        val httpPort = ctx.httpPort?.takeIf { it.isNotBlank() }
+        if (httpPort != null) {
+            // Prefer non-SSL HTTP Connector only — do not rewrite SSL connectors.
+            val httpConnectorRegex = Regex(
+                """(<Connector\b(?![^>]*SSLEnabled)[^>]*\bport=")(\d+)(")""",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            )
+            if (httpConnectorRegex.containsMatchIn(content)) {
+                val newContent = httpConnectorRegex.replaceFirst(content, "$1$httpPort$3")
+                if (newContent != content) {
+                    content = newContent
+                    modified = true
+                }
+            }
+        }
+
         if (modified) serverXml.writeText(content)
         return modified
-    }
-
-    private const val ZIDE_SSL_CONNECTOR = """<Connector port="8443"
-       maxThreads="150"
-       minSpareThreads="25"
-       maxSpareThreads="75"
-       enableLookups="false"
-       disableUploadTimeout="true"
-       useBodyEncodingForURI="true"
-       acceptCount="100"
-       connectionTimeout="20000"
-       debug="4"
-       scheme="https"
-       secure="true"
-       clientAuth="false"
-       sslProtocol="TLS"
-       SSLEnabled="true"
-       keystoreFile="conf/sas.keystore"
-       keystoreType="JKS"
-       keystorePass="N5${'$'}0IfC:4o:^KJ"
- />"""
-
-    fun patchHttpsConnector(ctx: PatchContext): Boolean {
-        val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
-        if (!serverXml.exists()) return false
-
-        var content = serverXml.readText()
-        val existingConnectorRegex = Regex("""<Connector[^>]*port="8443"[^/]*/?>""", RegexOption.DOT_MATCHES_ALL)
-        if (existingConnectorRegex.containsMatchIn(content)) {
-            content = existingConnectorRegex.replace(content, ZIDE_SSL_CONNECTOR)
-        } else {
-            content = content.replace("</Service>", "    $ZIDE_SSL_CONNECTOR\n    </Service>")
-        }
-        serverXml.writeText(content)
-        return true
-    }
-
-    fun downloadKeystoreFile(deploymentFolder: String, project: Project?): Boolean {
-        val destPath = Path.of(deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "sas.keystore")
-        Files.createDirectories(destPath.parent)
-        return try {
-            val url = URL("https://apptier.csez.zohocorpin.com/_static/keystore/2026-2027/sas.keystore")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 10_000
-            conn.readTimeout = 15_000
-            conn.connect()
-            if (conn.responseCode == 200) {
-                conn.inputStream.use { input -> Files.copy(input, destPath, StandardCopyOption.REPLACE_EXISTING) }
-                true
-            } else {
-                NotificationUtil.warn(project, "Failed to download sas.keystore (HTTP ${conn.responseCode}). Please make sure whether the internet connection is proper.")
-                false
-            }
-        } catch (e: Exception) {
-            NotificationUtil.warn(project, "Failed to download sas.keystore: Please make sure whether the internet connection is proper.")
-            false
-        }
     }
 
     private const val JSP_SERVLET_MARKER =
@@ -270,6 +223,18 @@ $JSP_SERVLET_MARKER"""
             }
         }
 
+        val httpPort = ctx.httpPort?.takeIf { it.isNotBlank() }
+        if (httpPort != null) {
+            val httpPortRegex = Regex("""(?m)^(http\.port=).*$""")
+            if (httpPortRegex.containsMatchIn(content)) {
+                val newContent = httpPortRegex.replace(content, "$1$httpPort")
+                if (newContent != content) {
+                    content = newContent
+                    modified = true
+                }
+            }
+        }
+
         if (modified) configProps.writeText(content)
         return modified
     }
@@ -368,6 +333,7 @@ $JSP_SERVLET_MARKER"""
             iamServer = zideProps["ZIDE.IAM_SERVER"],
             iamServiceName = zideProps["ZIDE.IAM_SERVICENAME"],
             hostName = zideProps["ZIDE.HOST_NAME"],
+            httpPort = zideProps["ZIDE.HTTP_PORT"] ?: serviceProps["ZIDE.HTTP_PORT"],
             httpsPort = zideProps["ZIDE.HTTPS_PORT"],
             dbType = zideProps["ZIDE_DB_TYPE"],
             dbName = zideProps["ZIDE_DB_NAME"],
@@ -376,5 +342,15 @@ $JSP_SERVLET_MARKER"""
             dbHost = zideProps["ZIDE_DB_HOST"],
             schemaName = zideProps["ZIDE.SCHEMA_NAME"]
         )
+    }
+
+    /**
+     * Eclipse LaunchUtil.doReplacer semantics: replace when DO_REPLACE is missing/"false",
+     * or when [forceEveryStart] is true. After a successful run, callers should set DO_REPLACE=true.
+     */
+    fun shouldReplace(serviceProps: Map<String, String>, forceEveryStart: Boolean = false): Boolean {
+        if (forceEveryStart) return true
+        val replaceVal = serviceProps["ZIDE.DO_REPLACE"]
+        return replaceVal.isNullOrBlank() || replaceVal.equals("false", ignoreCase = true)
     }
 }

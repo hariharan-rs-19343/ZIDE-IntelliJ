@@ -63,6 +63,63 @@ object ProcessUtil {
         return handler
     }
 
+    /**
+     * Runs a process with streaming output and blocks until exit (or [timeoutMs]).
+     * Invokes [shouldCancel] periodically; destroys the process when it returns true.
+     */
+    fun executeStreamingAndWait(
+        command: List<String>,
+        workingDir: String? = null,
+        env: Map<String, String> = emptyMap(),
+        timeoutMs: Long = 600_000,
+        pollMs: Long = 200,
+        shouldCancel: () -> Boolean = { false },
+        onStdout: (String) -> Unit = {},
+        onStderr: (String) -> Unit = {}
+    ): CapturedOutput {
+        val stdout = StringBuilder()
+        val stderr = StringBuilder()
+        var exitCode = -1
+        val handler = executeStreaming(
+            command = command,
+            workingDir = workingDir,
+            env = env,
+            onStdout = {
+                stdout.append(it)
+                onStdout(it)
+            },
+            onStderr = {
+                stderr.append(it)
+                onStderr(it)
+            },
+            onExit = { code -> exitCode = code }
+        )
+
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (!handler.isProcessTerminated) {
+            if (shouldCancel()) {
+                handler.destroyProcess()
+                break
+            }
+            if (System.currentTimeMillis() > deadline) {
+                handler.destroyProcess()
+                throw IllegalStateException("Process timed out after ${timeoutMs}ms: ${command.joinToString(" ")}")
+            }
+            try {
+                Thread.sleep(pollMs)
+            } catch (_: InterruptedException) {
+                handler.destroyProcess()
+                Thread.currentThread().interrupt()
+                break
+            }
+        }
+        handler.waitFor(5_000)
+        if (exitCode < 0) {
+            exitCode = handler.exitCode ?: -1
+        }
+        return CapturedOutput(stdout.toString(), stderr.toString(), exitCode)
+    }
+
     data class CapturedOutput(
         val stdout: String,
         val stderr: String,
