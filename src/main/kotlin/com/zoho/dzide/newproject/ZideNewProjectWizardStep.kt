@@ -131,12 +131,14 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
 
         saveRecentService(cleanServiceName)
         val selectedJdkHome = resolveJdkHomePath(jdkProperty.get())
+        val selectedJdkName = resolveJdkName(jdkProperty.get())
 
         val wizardResult = ZideProjectWizardDialog.WizardResult(
             name = projectName,
             location = projectPath,
             jdk = jdkProperty.get(),
             jdkHomePath = selectedJdkHome,
+            jdkName = selectedJdkName,
             branch = branchProperty.get(),
             buildType = buildTypeProperty.get(),
             buildUrl = buildUrlProperty.get(),
@@ -144,14 +146,13 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
             repositoryUrl = selectedProduct?.repositoryUrl ?: "",
             serviceName = selectedProduct?.name ?: "",
             downloadUrl = selectedProduct?.downloadUrl ?: "",
-
         )
 
         val creator = ZideProjectCreator(wizardResult)
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Creating ZIDE Project: $projectName", true) {
+        ProgressManager.getInstance().run(object : Task.Modal(project, "Creating ZIDE Project: $projectName", true) {
             override fun run(indicator: ProgressIndicator) {
-                creator.create(indicator)
+                creator.create(indicator, openAfterCreate = false)
             }
         })
     }
@@ -240,6 +241,15 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
         for (jdk in jdks) {
             val display = "${jdk.name} (${jdk.homePath ?: "unknown"})"
             if (display == comboText) return jdk.homePath ?: ""
+        }
+        return ""
+    }
+
+    private fun resolveJdkName(comboText: String): String {
+        val jdks = ProjectJdkTable.getInstance().allJdks
+        for (jdk in jdks) {
+            val display = "${jdk.name} (${jdk.homePath ?: "unknown"})"
+            if (display == comboText) return jdk.name
         }
         return ""
     }

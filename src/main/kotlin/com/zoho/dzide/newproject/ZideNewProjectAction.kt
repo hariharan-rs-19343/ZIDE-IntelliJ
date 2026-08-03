@@ -28,9 +28,9 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
 
         val creator = ZideProjectCreator(result)
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Creating ZIDE Project: ${result.name}", true) {
+        ProgressManager.getInstance().run(object : Task.Modal(project, "Creating ZIDE Project: ${result.name}", true) {
             override fun run(indicator: ProgressIndicator) {
-                creator.create(indicator)
+                creator.create(indicator, openAfterCreate = true)
             }
         })
     }
