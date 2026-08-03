@@ -57,8 +57,15 @@
         <ul>
             <li>Debug startup breakpoints — JPDA_SUSPEND=y causes the JVM to halt until the debugger attaches; breakpoints in service startup code (ZhareHubService.start(), Util.setSystemProperties(), etc.) are now hit</li>
             <li>Debug attach order fixed — debugger attaches immediately after JPDA socket opens (3s delay) instead of waiting for the HTTP port; server resumes with debugger active</li>
-            <li>Eclipse create/patch parity — pre/post hooks split, auto Tomcat register, DO_REPLACE-gated replace, install.xml Replacer, no keystore/HTTPS invention</li>
+            <li>Eclipse create/patch parity — pre/post hooks split, auto Tomcat register, DO_REPLACE-gated replace, install.xml Replacer</li>
             <li>Wizard: product download URL, MI deployment, runnable services, start-after-create</li>
+            <li>New Project progress — creation uses a modal progress dialog (clone, download, extract, patch) instead of a tiny status-bar indicator</li>
+            <li>JDK mapping on create — writes .idea/misc.xml with the selected project SDK so Project Structure no longer needs a manual JDK pick</li>
+            <li>Library mapping on create — writes project library ZIDE-WEB-INF-lib from deployment WEB-INF/lib and references it from the module .iml</li>
+            <li>HTTPS fix — rewrites the 8443 Connector with SSLEnabled + sas.keystore attrs (App. Server keystore; no download); preserves HTTP 8080; deduplicates 8443</li>
+            <li>server.xml Context patch — inserts Context with docBase, path="/", reloadable="true" and deployOnStartup="false" after HTTPS rewrite</li>
+            <li>Library reload race — ZIDE-WEB-INF-lib is updated in place (or skipped if unchanged) instead of delete-and-recreate on every server start</li>
+            <li>NPW open hang — New Project Wizard path no longer double-opens the project after Deployment Properties</li>
         </ul>
         <b>0.0.7</b>
         <ul>
@@ -67,7 +74,6 @@
             <li>Deploy sync server resolution — uses project.basePath directly with $PROJECT_DIR$ macro expansion; robust fallback to first server</li>
             <li>PostgreSQL reinit — now executes bundled postgres_functions.sql (UNIX_TIMESTAMP, GROUP_CONCAT, pgcrypto, citext) after schema creation</li>
             <li>Project .iml uses inheritedJdk — no longer hardcodes JDK name, uses project-level JDK setting</li>
-            <li>Removed invented SSL keystore download and HTTPS connector patching (App. Server container owns keystore; Eclipse-aligned)</li>
             <li>Auto-configure project libraries — all JARs from WEB-INF/lib/ added as IntelliJ project library on server start</li>
             <li>Diagnostic logging — deploy sync events logged at INFO level in idea.log for debugging</li>
         </ul>

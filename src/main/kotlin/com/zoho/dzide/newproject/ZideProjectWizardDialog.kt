@@ -394,6 +394,7 @@ class ZideProjectWizardDialog(
         val location: String,
         val jdk: String,
         val jdkHomePath: String,
+        val jdkName: String,
         val branch: String,
         val buildType: String,
         val buildUrl: String,
@@ -408,8 +409,9 @@ class ZideProjectWizardDialog(
 
     fun getResult(): WizardResult {
         val product = getSelectedProduct()
-        val selectedJdkName = jdkCombo.selectedItem as? String ?: ""
-        val jdkHome = resolveJdkHomePath(selectedJdkName)
+        val selectedJdkDisplay = jdkCombo.selectedItem as? String ?: ""
+        val jdkHome = resolveJdkHomePath(selectedJdkDisplay)
+        val jdkName = resolveJdkName(selectedJdkDisplay)
         val isLocal = localBuildRadio.isSelected
         val buildUrl = when {
             isLocal -> ""
@@ -419,8 +421,9 @@ class ZideProjectWizardDialog(
         return WizardResult(
             name = nameField.text.trim(),
             location = locationField.text.trim(),
-            jdk = selectedJdkName,
+            jdk = selectedJdkDisplay,
             jdkHomePath = jdkHome,
+            jdkName = jdkName,
             branch = branchField.text.trim(),
             buildType = if (isLocal) "local" else "remote",
             buildUrl = buildUrl,
@@ -439,6 +442,15 @@ class ZideProjectWizardDialog(
         for (jdk in jdks) {
             val display = "${jdk.name} (${jdk.homePath ?: "unknown"})"
             if (display == comboText) return jdk.homePath ?: ""
+        }
+        return ""
+    }
+
+    private fun resolveJdkName(comboText: String): String {
+        val jdks = ProjectJdkTable.getInstance().allJdks
+        for (jdk in jdks) {
+            val display = "${jdk.name} (${jdk.homePath ?: "unknown"})"
+            if (display == comboText) return jdk.name
         }
         return ""
     }

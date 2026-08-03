@@ -168,7 +168,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             // Step 10b: Configure IntelliJ module (natures/classpath equivalent)
             indicator.text = "Configuring project module..."
             indicator.fraction = 0.70
-            writeModuleIml(projectDir, deploymentDir, result)
+            writeModuleIml(projectDir, result)
             writeModulesXml(projectDir, result)
 
             // Step 10c: Post-creation + zide-module hooks
@@ -193,7 +193,15 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 runInitialConfigPatchIfNeeded(projectDir)
             }
 
-            // Step 12: Register Tomcat on existing project, or open once for menu-dialog path.
+            // Step 12: Configure IntelliJ module (source roots + libraries + SDK)
+            indicator.text = "Configuring project module..."
+            indicator.fraction = 0.85
+            writeLibraryConfig(projectDir, deploymentDir, result)
+            writeModuleIml(projectDir, result)
+            writeModulesXml(projectDir, result)
+            writeProjectSdkConfig(projectDir, result)
+
+            // Step 13: Register Tomcat on existing project, or open once for menu-dialog path.
             indicator.text = if (existingProject != null) "Registering Tomcat server..." else "Opening project..."
             indicator.fraction = 0.90
             ApplicationManager.getApplication().invokeAndWait {
@@ -936,12 +944,36 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
     // Create-time hardcoded patch removed — Eclipse applies replace at launch (DO_REPLACE).
 
-    private fun writeModuleIml(projectDir: File, deploymentDir: File, result: ZideProjectWizardDialog.WizardResult) {
+    private fun writeLibraryConfig(projectDir: File, deploymentDir: File, result: ZideProjectWizardDialog.WizardResult) {
+        val libDir = File(deploymentDir, "AdventNet/Sas/tomcat/webapps/${result.name}/WEB-INF/lib")
+        val libsDir = File(projectDir, ".idea/libraries").also { it.mkdirs() }
+        val roots = if (libDir.exists()) {
+            libDir.listFiles()
+                ?.filter { it.extension == "jar" }
+                ?.sortedBy { it.name }
+                ?.joinToString("\n") { """      <root url="jar://${it.absolutePath}!/" />""" }
+                ?: ""
+        } else {
+            ""
+        }
+        File(libsDir, "ZIDE_WEB_INF_lib.xml").writeText("""<?xml version="1.0" encoding="UTF-8"?>
+<component name="libraryTable">
+  <library name="ZIDE-WEB-INF-lib">
+    <CLASSES>
+$roots
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
+""")
+        log.info("Wrote project library ZIDE-WEB-INF-lib (${libDir.listFiles()?.count { it.extension == "jar" } ?: 0} jars)")
+    }
+
+    private fun writeModuleIml(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
         val moduleName = result.name
         val imlFile = File(projectDir, "$moduleName.iml")
         val sources = "src/main/java"
-        val deployServiceName = result.name
-        val libDir = File(deploymentDir, "AdventNet/Sas/tomcat/webapps/$deployServiceName/WEB-INF/lib")
 
         val iml = buildString {
             appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
@@ -953,13 +985,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             appendLine("""    </content>""")
             appendLine("""    <orderEntry type="inheritedJdk" />""")
             appendLine("""    <orderEntry type="sourceFolder" forTests="false" />""")
-            if (libDir.exists()) {
-                for (jar in libDir.listFiles()?.filter { it.extension == "jar" } ?: emptyList()) {
-                    appendLine("""    <orderEntry type="module-library">""")
-                    appendLine("""      <library><CLASSES><root url="jar://${jar.absolutePath}!/" /></CLASSES></library>""")
-                    appendLine("""    </orderEntry>""")
-                }
-            }
+            appendLine("""    <orderEntry type="library" name="ZIDE-WEB-INF-lib" level="project" />""")
             appendLine("""  </component>""")
             appendLine("""</module>""")
         }
@@ -979,6 +1005,23 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
   </component>
 </project>
 """)
+    }
+
+    private fun writeProjectSdkConfig(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
+        if (result.jdkName.isBlank()) {
+            log.warn("No JDK name available; skipping .idea/misc.xml project SDK config")
+            return
+        }
+        val ideaDir = File(projectDir, ".idea").also { it.mkdirs() }
+        File(ideaDir, "misc.xml").writeText("""<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_17"
+             default="false" project-jdk-name="${result.jdkName}" project-jdk-type="JavaSDK">
+    <output url="file://${'$'}PROJECT_DIR${'$'}/out" />
+  </component>
+</project>
+""")
+        log.info("Wrote project SDK config: ${result.jdkName}")
     }
 
     private fun rollback(projectDir: File, deploymentDir: File) {

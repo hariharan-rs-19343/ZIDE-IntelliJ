@@ -321,6 +321,8 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                                 ConsoleUtil.print(console, project, "  Applied data-driven replacements (${replacerResult.filesTouched} file(s)).\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             } else {
                                 val patchResult = DeploymentConfigPatcher.patchAll(patchCtx, project)
+                                if (patchResult.httpsPortUpdated)
+                                    ConsoleUtil.print(console, project, "  Rewrote HTTPS Connector (SSLEnabled + sas.keystore)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                                 if (patchResult.serverXmlPatched)
                                     ConsoleUtil.print(console, project, "  Patched server.xml (Context, shutdown port, HTTP port)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                                 if (patchResult.webXmlPatched)
@@ -331,10 +333,15 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                                     ConsoleUtil.print(console, project, "  Patched security-properties.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                                 if (patchResult.configPropertiesPatched)
                                     ConsoleUtil.print(console, project, "  Patched configuration.properties\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                                if (patchResult.keystoreMissing)
+                                    ConsoleUtil.print(console, project, "  Warning: sas.keystore missing in tomcat/conf/ — HTTPS will not work\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
                                 for (err in patchResult.errors) {
                                     ConsoleUtil.print(console, project, "  Patch error: $err\n", ConsoleViewContentType.ERROR_OUTPUT)
                                 }
-                                if (!patchResult.serverXmlPatched && !patchResult.webXmlPatched && !patchResult.persistencePatched && !patchResult.securityPatched && !patchResult.configPropertiesPatched && patchResult.errors.isEmpty()) {
+                                if (!patchResult.httpsPortUpdated && !patchResult.serverXmlPatched && !patchResult.webXmlPatched &&
+                                    !patchResult.persistencePatched && !patchResult.securityPatched &&
+                                    !patchResult.configPropertiesPatched && patchResult.errors.isEmpty()
+                                ) {
                                     ConsoleUtil.print(console, project, "  Config files already up to date.\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                                 }
                             }

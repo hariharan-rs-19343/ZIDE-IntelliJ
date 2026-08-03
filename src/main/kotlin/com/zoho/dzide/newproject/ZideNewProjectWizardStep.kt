@@ -163,12 +163,14 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
 
         saveRecentService(cleanServiceName)
         val selectedJdkHome = resolveJdkHomePath(jdkProperty.get())
+        val selectedJdkName = resolveJdkName(jdkProperty.get())
 
         val wizardResult = ZideProjectWizardDialog.WizardResult(
             name = projectName,
             location = projectPath,
             jdk = jdkProperty.get(),
             jdkHomePath = selectedJdkHome,
+            jdkName = selectedJdkName,
             branch = branchProperty.get(),
             buildType = buildTypeProperty.get(),
             buildUrl = if (useProductUrlProperty.get() && buildUrlProperty.get().isBlank()) {
@@ -278,6 +280,15 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
         for (jdk in jdks) {
             val display = "${jdk.name} (${jdk.homePath ?: "unknown"})"
             if (display == comboText) return jdk.homePath ?: ""
+        }
+        return ""
+    }
+
+    private fun resolveJdkName(comboText: String): String {
+        val jdks = ProjectJdkTable.getInstance().allJdks
+        for (jdk in jdks) {
+            val display = "${jdk.name} (${jdk.homePath ?: "unknown"})"
+            if (display == comboText) return jdk.name
         }
         return ""
     }
