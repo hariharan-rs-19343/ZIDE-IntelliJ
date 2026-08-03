@@ -60,12 +60,14 @@
             <li>Eclipse create/patch parity — pre/post hooks split, auto Tomcat register, DO_REPLACE-gated replace, install.xml Replacer</li>
             <li>Wizard: product download URL, MI deployment, runnable services, start-after-create</li>
             <li>New Project progress — creation uses a modal progress dialog (clone, download, extract, patch) instead of a tiny status-bar indicator</li>
-            <li>JDK mapping on create — writes .idea/misc.xml with the selected project SDK so Project Structure no longer needs a manual JDK pick</li>
+            <li>JDK mapping on create — writes .idea/misc.xml and applies the selected SDK via ProjectRootManager so Project Structure shows it immediately</li>
             <li>Library mapping on create — writes project library ZIDE-WEB-INF-lib from deployment WEB-INF/lib and references it from the module .iml</li>
             <li>HTTPS fix — rewrites the 8443 Connector with SSLEnabled + sas.keystore attrs (App. Server keystore; no download); preserves HTTP 8080; deduplicates 8443</li>
             <li>server.xml Context patch — inserts Context with docBase, path="/", reloadable="true" and deployOnStartup="false" after HTTPS rewrite</li>
             <li>Library reload race — ZIDE-WEB-INF-lib is updated in place (or skipped if unchanged) instead of delete-and-recreate on every server start</li>
             <li>NPW open hang — New Project Wizard path no longer double-opens the project after Deployment Properties</li>
+            <li>Empty Modules fix — after create, load the written .iml into ModuleManager; clone into open NPW dirs via temp swap instead of deleting the project basePath</li>
+            <li>Source roots — detect real source folders (SourceFolderDetector) for .iml and ZIDE.SOURCES instead of hardcoding src/main/java</li>
         </ul>
         <b>0.0.7</b>
         <ul>

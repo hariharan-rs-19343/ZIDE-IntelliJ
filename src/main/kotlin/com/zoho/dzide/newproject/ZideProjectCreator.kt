@@ -2,14 +2,20 @@ package com.zoho.dzide.newproject
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.projectRoots.ProjectJdkTable
+import com.intellij.openapi.roots.LanguageLevelProjectExtension
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.pom.java.LanguageLevel
 import com.zoho.dzide.debug.DebuggerAttachUtil
+import com.zoho.dzide.parser.SourceFolderDetector
 import com.zoho.dzide.settings.ZideSettingsState
 import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.zide.DeploymentConfigPatcher
@@ -19,6 +25,7 @@ import java.io.File
 import java.net.InetAddress
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 
 class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResult) {
 
@@ -42,7 +49,13 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             if (result.repositoryUrl.isNotBlank()) {
                 indicator.isIndeterminate = true
                 indicator.text = "Cloning repository..."
-                cloneRepository(result.repositoryUrl, result.branch, projectDir, indicator)
+                cloneRepository(
+                    result.repositoryUrl,
+                    result.branch,
+                    projectDir,
+                    indicator,
+                    preserveOpenProjectDir = existingProject != null
+                )
             } else {
                 indicator.text = "Creating project directory..."
                 indicator.fraction = 0.0
@@ -201,17 +214,19 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             writeModulesXml(projectDir, result)
             writeProjectSdkConfig(projectDir, result)
 
-            // Step 13: Register Tomcat on existing project, or open once for menu-dialog path.
-            indicator.text = if (existingProject != null) "Registering Tomcat server..." else "Opening project..."
+            // Step 13: Load modules into the live project (NPW) or open once (menu path), then register Tomcat.
+            indicator.text = if (existingProject != null) "Loading project module..." else "Opening project..."
             indicator.fraction = 0.90
             ApplicationManager.getApplication().invokeAndWait {
                 val targetProject = if (existingProject != null && !existingProject.isDisposed) {
-                    refreshProjectFiles(projectDir)
+                    ensureModuleLoaded(existingProject, projectDir, result.name)
                     existingProject
                 } else {
                     com.intellij.ide.impl.ProjectUtil.openOrImport(projectDir.toPath(), null, true)
                 }
                 if (targetProject != null && !targetProject.isDisposed) {
+                    // Disk misc.xml alone is ignored by an already-open project — set SDK in memory too.
+                    applyProjectSdk(targetProject, result)
                     registerTomcatAndDependencies(targetProject, projectDir, deploymentDir, deployServiceName)
                     if (result.startAfterCreate) {
                         startServerAfterCreate(targetProject)
@@ -258,6 +273,58 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         }
     }
 
+    /**
+     * Disk writes of `.iml` / `modules.xml` do not update ModuleManager for an already-open project.
+     * After NPW create (and especially after in-place clone swap), load the module so Project Structure is not empty.
+     */
+    private fun ensureModuleLoaded(project: Project, projectDir: File, moduleName: String) {
+        refreshProjectFiles(projectDir)
+        val imlFile = File(projectDir, "$moduleName.iml")
+        if (!imlFile.isFile) {
+            log.warn("Cannot load module: missing ${imlFile.absolutePath}")
+            return
+        }
+        val imlPath = imlFile.canonicalPath
+        try {
+            ApplicationManager.getApplication().runWriteAction {
+                val moduleManager = ModuleManager.getInstance(project)
+                val model = moduleManager.getModifiableModel()
+                try {
+                    val modules = model.modules
+                    for (i in modules.indices) {
+                        val module = modules[i]
+                        val modulePath = module.moduleFile?.path ?: continue
+                        if (!File(modulePath).exists()) {
+                            model.disposeModule(module)
+                        }
+                    }
+                    val alreadyLoaded = model.modules.any { module ->
+                        val modulePath = module.moduleFile?.path
+                        modulePath != null && File(modulePath).canonicalPath == imlPath
+                    }
+                    if (!alreadyLoaded) {
+                        model.loadModule(imlPath)
+                        log.info("Loaded module '$moduleName' from $imlPath")
+                    } else {
+                        log.info("Module '$moduleName' already loaded")
+                    }
+                    model.commit()
+                } catch (e: Exception) {
+                    model.dispose()
+                    throw e
+                }
+            }
+            refreshProjectFiles(projectDir)
+        } catch (e: Exception) {
+            log.warn("Failed to load module into project; attempting project reload", e)
+            try {
+                ProjectManager.getInstance().reloadProject(project)
+            } catch (reloadEx: Exception) {
+                log.warn("Project reload also failed", reloadEx)
+            }
+        }
+    }
+
     private fun runInitialConfigPatchIfNeeded(projectDir: File) {
         val projectPath = projectDir.absolutePath
         ZideConfigParser.clearCache(projectPath)
@@ -273,7 +340,13 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         // Leave DO_REPLACE=false so start-time replace/replacer still runs (Eclipse cold start).
     }
 
-    private fun cloneRepository(repositoryUrl: String, branch: String, projectDir: File, indicator: ProgressIndicator) {
+    private fun cloneRepository(
+        repositoryUrl: String,
+        branch: String,
+        projectDir: File,
+        indicator: ProgressIndicator,
+        preserveOpenProjectDir: Boolean
+    ) {
         val gitPath = resolveGitExecutable()
             ?: throw RuntimeException("Git not found. Configure git path in Settings > Tools > Zide > Git.")
 
@@ -281,15 +354,26 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         indicator.text = "Cloning $repositoryUrl (branch: $branchArg)..."
         indicator.text2 = "Starting git clone..."
 
-        // Clear destination so git clone can succeed (wizard may have created an empty dir).
-        if (projectDir.exists()) {
-            projectDir.deleteRecursively()
+        // Never deleteRecursively an already-open NPW project basePath — clone to temp and swap contents.
+        val useTempClone = preserveOpenProjectDir ||
+            (projectDir.exists() && projectDir.list()?.isNotEmpty() == true)
+        val cloneDest = if (useTempClone) {
+            val parent = projectDir.parentFile
+                ?: throw RuntimeException("Cannot resolve parent directory for clone: ${projectDir.absolutePath}")
+            File(parent, ".dzide-tmp-clone-${result.name}-${System.nanoTime()}").also { dest ->
+                if (dest.exists()) dest.deleteRecursively()
+            }
+        } else {
+            if (projectDir.exists()) {
+                projectDir.deleteRecursively()
+            }
+            projectDir
         }
 
         val cloneResult = ProcessUtil.executeStreamingAndWait(
             command = listOf(
                 gitPath, "clone", "--progress", "-b", branchArg,
-                repositoryUrl, projectDir.absolutePath
+                repositoryUrl, cloneDest.absolutePath
             ),
             timeoutMs = 600_000,
             shouldCancel = {
@@ -304,9 +388,53 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             onStderr = { chunk -> updateIndicatorProgressLine(indicator, chunk) }
         )
         if (cloneResult.exitCode != 0) {
+            if (cloneDest != projectDir && cloneDest.exists()) {
+                cloneDest.deleteRecursively()
+            }
             throw RuntimeException("Git clone failed (exit code ${cloneResult.exitCode}): ${cloneResult.stderr.takeLast(500)}")
         }
+
+        if (cloneDest != projectDir) {
+            indicator.text2 = "Moving clone into project directory..."
+            try {
+                replaceDirectoryContents(projectDir, cloneDest)
+            } finally {
+                if (cloneDest.exists()) {
+                    cloneDest.deleteRecursively()
+                }
+            }
+        }
         indicator.text2 = "Clone complete"
+    }
+
+    /** Clears [target] children and moves [source] children into [target] (keeps [target] directory identity). */
+    private fun replaceDirectoryContents(target: File, source: File) {
+        target.mkdirs()
+        target.listFiles()?.forEach { child ->
+            if (!child.deleteRecursively()) {
+                log.warn("Failed to delete ${child.absolutePath} before clone swap")
+            }
+        }
+        val children = source.listFiles() ?: emptyArray()
+        for (child in children) {
+            val dest = File(target, child.name)
+            val moved = child.renameTo(dest)
+            if (!moved) {
+                Files.walk(child.toPath()).use { stream ->
+                    stream.forEach { path ->
+                        val relative = child.toPath().relativize(path)
+                        val destPath = dest.toPath().resolve(relative)
+                        if (Files.isDirectory(path)) {
+                            Files.createDirectories(destPath)
+                        } else {
+                            Files.createDirectories(destPath.parent)
+                            Files.copy(path, destPath, StandardCopyOption.REPLACE_EXISTING)
+                        }
+                    }
+                }
+                child.deleteRecursively()
+            }
+        }
     }
 
     private fun downloadBuild(buildUrl: String, projectName: String, indicator: ProgressIndicator): Path? {
@@ -440,7 +568,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             appendLine("""    <property name="ZIDE.COLD_START" value="true"/>""")
             appendLine("""    <property name="ZIDE.DO_REPLACE" value="false"/>""")
             appendLine("""    <property name="ZIDE.PERMISSION" value="1"/>""")
-            appendLine("""    <property name="ZIDE.SOURCES" value="src/main/java"/>""")
+            appendLine("""    <property name="ZIDE.SOURCES" value="${SourceFolderDetector.detectCsv(projectDir)}"/>""")
             appendLine("""    <property name="ZIDE.REPO_TYPE" value="2"/>""")
             appendLine("""    <property name="ZIDE.DEPLOY_TYPE" value="M19"/>""")
             appendLine("""    <property name="ZIDE.MI_DEPLOYMENT" value="${result.miDeployment}"/>""")
@@ -973,7 +1101,7 @@ $roots
     private fun writeModuleIml(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
         val moduleName = result.name
         val imlFile = File(projectDir, "$moduleName.iml")
-        val sources = "src/main/java"
+        val sourceFolders = SourceFolderDetector.detect(projectDir).ifEmpty { listOf("src/main/java") }
 
         val iml = buildString {
             appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
@@ -981,7 +1109,9 @@ $roots
             appendLine("""  <component name="NewModuleRootManager" inherit-compiler-output="true">""")
             appendLine("""    <exclude-output />""")
             appendLine("""    <content url="file://${'$'}MODULE_DIR${'$'}">""")
-            appendLine("""      <sourceFolder url="file://${'$'}MODULE_DIR${'$'}/$sources" isTestSource="false" />""")
+            for (sources in sourceFolders) {
+                appendLine("""      <sourceFolder url="file://${'$'}MODULE_DIR${'$'}/$sources" isTestSource="false" />""")
+            }
             appendLine("""    </content>""")
             appendLine("""    <orderEntry type="inheritedJdk" />""")
             appendLine("""    <orderEntry type="sourceFolder" forTests="false" />""")
@@ -990,6 +1120,7 @@ $roots
             appendLine("""</module>""")
         }
         imlFile.writeText(iml)
+        log.info("Wrote module $moduleName.iml with sources: ${sourceFolders.joinToString()}")
     }
 
     private fun writeModulesXml(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
@@ -1008,7 +1139,8 @@ $roots
     }
 
     private fun writeProjectSdkConfig(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
-        if (result.jdkName.isBlank()) {
+        val jdkName = resolveSelectedJdkName(result)
+        if (jdkName.isBlank()) {
             log.warn("No JDK name available; skipping .idea/misc.xml project SDK config")
             return
         }
@@ -1016,12 +1148,63 @@ $roots
         File(ideaDir, "misc.xml").writeText("""<?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ProjectRootManager" version="2" languageLevel="JDK_17"
-             default="false" project-jdk-name="${result.jdkName}" project-jdk-type="JavaSDK">
+             default="false" project-jdk-name="$jdkName" project-jdk-type="JavaSDK">
     <output url="file://${'$'}PROJECT_DIR${'$'}/out" />
   </component>
 </project>
 """)
-        log.info("Wrote project SDK config: ${result.jdkName}")
+        log.info("Wrote project SDK config: $jdkName")
+    }
+
+    /**
+     * Apply the wizard-selected JDK to the live project. Writing misc.xml alone does not update
+     * Project Structure for an already-open New Project Wizard project.
+     */
+    private fun applyProjectSdk(project: Project, result: ZideProjectWizardDialog.WizardResult) {
+        val sdk = resolveSelectedSdk(result)
+        if (sdk == null) {
+            log.warn(
+                "Could not resolve project SDK (jdkName='${result.jdkName}', jdkHome='${result.jdkHomePath}'); " +
+                    "Project Structure SDK may remain unset"
+            )
+            return
+        }
+        try {
+            ApplicationManager.getApplication().runWriteAction {
+                ProjectRootManager.getInstance(project).projectSdk = sdk
+                LanguageLevelProjectExtension.getInstance(project)?.languageLevel = LanguageLevel.JDK_17
+            }
+            // Keep misc.xml in sync with the SDK that was actually applied.
+            writeProjectSdkConfig(File(project.basePath ?: return), result.copy(jdkName = sdk.name))
+            log.info("Applied project SDK '${sdk.name}' (${sdk.homePath})")
+        } catch (e: Exception) {
+            log.warn("Failed to apply project SDK '${sdk.name}'", e)
+        }
+    }
+
+    private fun resolveSelectedJdkName(result: ZideProjectWizardDialog.WizardResult): String {
+        if (result.jdkName.isNotBlank()) return result.jdkName
+        return resolveSelectedSdk(result)?.name ?: ""
+    }
+
+    private fun resolveSelectedSdk(result: ZideProjectWizardDialog.WizardResult): com.intellij.openapi.projectRoots.Sdk? {
+        val table = ProjectJdkTable.getInstance()
+        if (result.jdkName.isNotBlank()) {
+            table.findJdk(result.jdkName)?.let { return it }
+        }
+        val home = result.jdkHomePath.trim()
+        if (home.isNotBlank()) {
+            table.allJdks.firstOrNull { it.homePath == home }?.let { return it }
+        }
+        // Combo display text sometimes lands in result.jdk as "Name (home)"
+        val display = result.jdk.trim()
+        if (display.isNotBlank()) {
+            for (jdk in table.allJdks) {
+                val label = "${jdk.name} (${jdk.homePath ?: "unknown"})"
+                if (label == display || jdk.name == display) return jdk
+            }
+        }
+        return null
     }
 
     private fun rollback(projectDir: File, deploymentDir: File) {
