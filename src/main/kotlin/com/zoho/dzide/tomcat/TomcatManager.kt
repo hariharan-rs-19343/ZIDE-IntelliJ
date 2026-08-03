@@ -134,17 +134,21 @@ class TomcatManager(private val project: Project) : Disposable {
         log("Patching deployment configs for ${patchCtx.parentService}...")
         val result = DeploymentConfigPatcher.patchAll(patchCtx, project)
 
+        if (result.serverXmlRestoredFromOrig) log("  Restored server.xml from server.xml.orig (App. Server baseline)")
+        if (result.httpsPortUpdated) log("  Rewrote HTTPS Connector (SSLEnabled + sas.keystore); preserved HTTP connector")
         if (result.serverXmlPatched) log("  Patched server.xml (Context element, shutdown port)")
         if (result.webXmlPatched) log("  Patched web.xml (JSP servlet for dynamic compilation)")
         if (result.persistencePatched) log("  Patched persistence-configurations.xml (DBName, DSAdapter, StartDBServer)")
         if (result.securityPatched) log("  Patched security-properties.xml (IAM server, service name, logout URL)")
         if (result.configPropertiesPatched) log("  Patched configuration.properties (DB driver, URL, port, vendor, credentials)")
-        if (result.httpsConnectorPatched) log("  Patched HTTPS Connector (port 8443, SSL keystore)")
-        if (result.keystoreDownloaded) log("  Downloaded sas.keystore to tomcat/conf/")
+        if (result.keystoreMissing) logError("  sas.keystore missing in tomcat/conf/ — HTTPS will not work (App. Server must ship it)")
         for (err in result.errors) {
             logError("  Patch error: $err")
         }
-        if (!result.serverXmlPatched && !result.webXmlPatched && !result.persistencePatched && !result.securityPatched && !result.configPropertiesPatched && result.errors.isEmpty()) {
+        if (!result.serverXmlRestoredFromOrig && !result.httpsPortUpdated && !result.serverXmlPatched &&
+            !result.webXmlPatched && !result.persistencePatched && !result.securityPatched &&
+            !result.configPropertiesPatched && result.errors.isEmpty()
+        ) {
             log("  Config files already up to date.")
         }
     }

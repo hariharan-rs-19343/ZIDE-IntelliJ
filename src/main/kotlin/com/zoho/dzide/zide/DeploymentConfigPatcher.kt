@@ -1,9 +1,8 @@
 package com.zoho.dzide.zide
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.zoho.dzide.util.NotificationUtil
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -18,10 +17,15 @@ import kotlin.io.path.writeText
  * 1. configuration.properties — DB driver, URL, port, vendor, credentials, schema
  * 2. persistence-configurations.xml — DBName, DSAdapter, StartDBServer
  * 3. security-properties.xml — IAM server, service name, logout page
- * 4. server.xml — Context element, shutdown port
+ * 4. server.xml — restore from server.xml.orig, Context element, shutdown port, HTTPS port on existing SSL connector
  * 5. web.xml — JSP servlet for dynamic compilation
+ *
+ * SSL keystore and HTTPS Connector ownership: App. Server container only.
+ * This plugin never downloads sas.keystore or injects a new HTTPS Connector.
  */
 object DeploymentConfigPatcher {
+
+    private val log = Logger.getInstance(DeploymentConfigPatcher::class.java)
 
     data class PatchContext(
         val deploymentFolder: String,
@@ -46,24 +50,156 @@ object DeploymentConfigPatcher {
         val persistencePatched: Boolean = false,
         val securityPatched: Boolean = false,
         val configPropertiesPatched: Boolean = false,
-        val httpsConnectorPatched: Boolean = false,
-        val keystoreDownloaded: Boolean = false,
+        val serverXmlRestoredFromOrig: Boolean = false,
+        val httpsPortUpdated: Boolean = false,
+        val keystoreMissing: Boolean = false,
         val errors: List<String> = emptyList()
     )
 
     fun patchAll(ctx: PatchContext, project: Project? = null): PatchResult {
         val errors = mutableListOf<String>()
-        val serverXmlOk = try { patchServerXml(ctx) } catch (e: Exception) { errors.add("server.xml: ${e.message}"); false }
+
+        // Case 2 experiment: no .orig restore / no Context patch — only rewrite 8443 SSL Connector
+        val restoredFromOrig = false
+        val serverXmlOk = false
+        val httpsPortUpdated = try {
+            ensureHttpsConnector(ctx)
+        } catch (e: Exception) {
+            errors.add("HTTPS connector: ${e.message}")
+            false
+        }
+
         val webXmlOk = try { patchWebXml(ctx) } catch (e: Exception) { errors.add("web.xml: ${e.message}"); false }
         val persistenceOk = try { patchPersistenceConfig(ctx) } catch (e: Exception) { errors.add("persistence-configurations.xml: ${e.message}"); false }
         val securityOk = try { patchSecurityProperties(ctx) } catch (e: Exception) { errors.add("security-properties.xml: ${e.message}"); false }
         val configPropsOk = try { patchConfigurationProperties(ctx) } catch (e: Exception) { errors.add("configuration.properties: ${e.message}"); false }
-        // Disabled: SSL keystore download and HTTPS connector patching
-        // val httpsOk = try { patchHttpsConnector(ctx) } catch (e: Exception) { errors.add("HTTPS connector: ${e.message}"); false }
-        // val keystoreOk = try { downloadKeystoreFile(ctx.deploymentFolder, project) } catch (e: Exception) { errors.add("sas.keystore: ${e.message}"); false }
-        val httpsOk = false
-        val keystoreOk = false
-        return PatchResult(serverXmlOk, webXmlOk, persistenceOk, securityOk, configPropsOk, httpsOk, keystoreOk, errors)
+
+        val keystorePath = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "sas.keystore")
+        val keystoreMissing = !keystorePath.exists()
+        if (keystoreMissing) {
+            val msg = "tomcat/conf/sas.keystore not found — HTTPS will fail. App. Server container must ship the keystore."
+            log.warn(msg)
+            NotificationUtil.warn(project, msg)
+        }
+
+        return PatchResult(
+            serverXmlPatched = serverXmlOk,
+            webXmlPatched = webXmlOk,
+            persistencePatched = persistenceOk,
+            securityPatched = securityOk,
+            configPropertiesPatched = configPropsOk,
+            serverXmlRestoredFromOrig = restoredFromOrig,
+            httpsPortUpdated = httpsPortUpdated,
+            keystoreMissing = keystoreMissing,
+            errors = errors
+        )
+    }
+
+    /**
+     * Eclipse createTomcatSetup: copy conf/server.xml.orig → conf/server.xml when present
+     * so the App. Server baseline (including SSL connector) is restored before ZIDE patches.
+     */
+    fun restoreServerXmlFromOrig(deploymentFolder: String): Boolean {
+        val conf = Path.of(deploymentFolder, "AdventNet", "Sas", "tomcat", "conf")
+        val orig = conf.resolve("server.xml.orig")
+        val serverXml = conf.resolve("server.xml")
+        if (!orig.exists()) return false
+        Files.copy(orig, serverXml, StandardCopyOption.REPLACE_EXISTING)
+        return true
+    }
+
+    /**
+     * Updates port on an existing SSL/HTTPS Connector from ZIDE.HTTPS_PORT.
+     * Never injects a new Connector.
+     */
+    fun updateExistingHttpsPort(ctx: PatchContext): Boolean {
+        val port = ctx.httpsPort?.takeIf { it.isNotBlank() } ?: return false
+        val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
+        if (!serverXml.exists()) return false
+
+        var content = serverXml.readText()
+        // Match Connector elements that are SSL/HTTPS (self-closing or with body)
+        val connectorRegex = Regex(
+            """<Connector\b[^>]*(?:SSLEnabled\s*=\s*"true"|scheme\s*=\s*"https")[^>]*?/?>""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+        )
+        val match = connectorRegex.find(content) ?: run {
+            log.warn("No SSL/HTTPS Connector found in server.xml — App. Server config must provide it")
+            return false
+        }
+
+        val original = match.value
+        val portRegex = Regex("""\bport\s*=\s*"[^"]*"""")
+        val updated = if (portRegex.containsMatchIn(original)) {
+            portRegex.replace(original, """port="$port"""")
+        } else {
+            original.replace("<Connector", """<Connector port="$port"""", ignoreCase = true)
+        }
+        if (updated == original) return false
+
+        content = content.replace(original, updated)
+        serverXml.writeText(content)
+        return true
+    }
+
+    /**
+     * Rewrite HTTPS Connector(s) to the working Eclipse zharehub SSL attrs.
+     * Preserves the HTTP 8080 connector (never matches redirectPort="8443").
+     * Removes all HTTPS/8443 duplicates and inserts exactly one SSL connector.
+     */
+    fun ensureHttpsConnector(ctx: PatchContext): Boolean {
+        val port = ctx.httpsPort?.takeIf { it.isNotBlank() } ?: "8443"
+        val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
+        if (!serverXml.exists()) return false
+
+        val sslConnector =
+            """<Connector SSLEnabled="true" acceptCount="100" clientAuth="false" connectionTimeout="20000" debug="4" disableUploadTimeout="true" enableLookups="false" keystoreFile="conf/sas.keystore" keystorePass="N5${'$'}0IfC:4o:^KJ" keystoreType="JKS" maxSpareThreads="75" maxThreads="150" minSpareThreads="25" parseBodyMethods="POST,PUT" port="$port" relaxedQueryChars="[]|{}" scheme="https" secure="true" sslProtocol="TLS" useBodyEncodingForURI="true"/>"""
+
+        var content = serverXml.readText()
+        val allConnectors = Regex(
+            """<Connector\b[^>]*?/?>""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+        ).findAll(content).map { it.value }.toList()
+
+        // Attribute port= only — not redirectPort=
+        val httpsPortAttr = Regex("""(?<![A-Za-z])port\s*=\s*"${Regex.escape(port)}"""", RegexOption.IGNORE_CASE)
+        val httpPortAttr = Regex("""(?<![A-Za-z])port\s*=\s*"8080"""", RegexOption.IGNORE_CASE)
+        val sslEnabledAttr = Regex("""SSLEnabled\s*=\s*"true"""", RegexOption.IGNORE_CASE)
+        val schemeHttpsAttr = Regex("""scheme\s*=\s*"https"""", RegexOption.IGNORE_CASE)
+
+        fun isHttpConnector(connector: String): Boolean = httpPortAttr.containsMatchIn(connector)
+
+        fun isHttpsCandidate(connector: String): Boolean {
+            if (isHttpConnector(connector)) return false
+            return httpsPortAttr.containsMatchIn(connector) ||
+                sslEnabledAttr.containsMatchIn(connector) ||
+                schemeHttpsAttr.containsMatchIn(connector)
+        }
+
+        val httpsConnectors = allConnectors.filter { isHttpsCandidate(it) }
+        for (dup in httpsConnectors) {
+            content = content.replace(dup, "")
+        }
+        // Clean blank lines left by removals
+        content = content.replace(Regex("""(\r?\n)[ \t]*(\r?\n){2,}"""), "$1$1")
+
+        val httpConnectorMatch = Regex(
+            """<Connector\b[^>]*?/?>""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+        ).findAll(content).firstOrNull { isHttpConnector(it.value) }
+
+        content = if (httpConnectorMatch != null) {
+            content.replace(
+                httpConnectorMatch.value,
+                httpConnectorMatch.value + "\n\n    " + sslConnector
+            )
+        } else {
+            content.replace("</Service>", "        $sslConnector\n    </Service>")
+        }
+
+        serverXml.writeText(content)
+        log.info("Rewrote HTTPS Connector (port=$port); preserved HTTP connector; removed ${httpsConnectors.size} prior HTTPS candidate(s)")
+        return true
     }
 
     fun patchServerXml(ctx: PatchContext): Boolean {
@@ -100,63 +236,6 @@ object DeploymentConfigPatcher {
 
         if (modified) serverXml.writeText(content)
         return modified
-    }
-
-    private const val ZIDE_SSL_CONNECTOR = """<Connector port="8443"
-       maxThreads="150"
-       minSpareThreads="25"
-       maxSpareThreads="75"
-       enableLookups="false"
-       disableUploadTimeout="true"
-       useBodyEncodingForURI="true"
-       acceptCount="100"
-       connectionTimeout="20000"
-       debug="4"
-       scheme="https"
-       secure="true"
-       clientAuth="false"
-       sslProtocol="TLS"
-       SSLEnabled="true"
-       keystoreFile="conf/sas.keystore"
-       keystoreType="JKS"
-       keystorePass="N5${'$'}0IfC:4o:^KJ"
- />"""
-
-    fun patchHttpsConnector(ctx: PatchContext): Boolean {
-        val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
-        if (!serverXml.exists()) return false
-
-        var content = serverXml.readText()
-        val existingConnectorRegex = Regex("""<Connector[^>]*port="8443"[^/]*/?>""", RegexOption.DOT_MATCHES_ALL)
-        if (existingConnectorRegex.containsMatchIn(content)) {
-            content = existingConnectorRegex.replace(content, ZIDE_SSL_CONNECTOR)
-        } else {
-            content = content.replace("</Service>", "    $ZIDE_SSL_CONNECTOR\n    </Service>")
-        }
-        serverXml.writeText(content)
-        return true
-    }
-
-    fun downloadKeystoreFile(deploymentFolder: String, project: Project?): Boolean {
-        val destPath = Path.of(deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "sas.keystore")
-        Files.createDirectories(destPath.parent)
-        return try {
-            val url = URL("https://apptier.csez.zohocorpin.com/_static/keystore/2026-2027/sas.keystore")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 10_000
-            conn.readTimeout = 15_000
-            conn.connect()
-            if (conn.responseCode == 200) {
-                conn.inputStream.use { input -> Files.copy(input, destPath, StandardCopyOption.REPLACE_EXISTING) }
-                true
-            } else {
-                NotificationUtil.warn(project, "Failed to download sas.keystore (HTTP ${conn.responseCode}). Please make sure whether the internet connection is proper.")
-                false
-            }
-        } catch (e: Exception) {
-            NotificationUtil.warn(project, "Failed to download sas.keystore: Please make sure whether the internet connection is proper.")
-            false
-        }
     }
 
     private const val JSP_SERVLET_MARKER =

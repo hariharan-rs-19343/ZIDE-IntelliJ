@@ -308,6 +308,10 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                         )
                         if (patchCtx != null) {
                             val patchResult = DeploymentConfigPatcher.patchAll(patchCtx, project)
+                            if (patchResult.serverXmlRestoredFromOrig)
+                                ConsoleUtil.print(console, project, "  Restored server.xml from server.xml.orig (App. Server baseline)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                            if (patchResult.httpsPortUpdated)
+                                ConsoleUtil.print(console, project, "  Rewrote HTTPS Connector (SSLEnabled + sas.keystore)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             if (patchResult.serverXmlPatched)
                                 ConsoleUtil.print(console, project, "  Patched server.xml (Context element, shutdown port)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             if (patchResult.webXmlPatched)
@@ -316,14 +320,16 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                                 ConsoleUtil.print(console, project, "  Patched persistence-configurations.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             if (patchResult.securityPatched)
                                 ConsoleUtil.print(console, project, "  Patched security-properties.xml\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            if (patchResult.httpsConnectorPatched)
-                                ConsoleUtil.print(console, project, "  Patched HTTPS Connector (port 8443, SSL keystore)\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-                            if (patchResult.keystoreDownloaded)
-                                ConsoleUtil.print(console, project, "  Downloaded sas.keystore to tomcat/conf/\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                            if (patchResult.keystoreMissing)
+                                ConsoleUtil.print(console, project, "  Warning: sas.keystore missing in tomcat/conf/ — HTTPS will not work\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
                             for (err in patchResult.errors) {
                                 ConsoleUtil.print(console, project, "  Patch error: $err\n", ConsoleViewContentType.ERROR_OUTPUT)
                             }
-                            if (!patchResult.serverXmlPatched && !patchResult.webXmlPatched && !patchResult.persistencePatched && !patchResult.securityPatched && patchResult.errors.isEmpty()) {
+                            if (!patchResult.serverXmlRestoredFromOrig && !patchResult.httpsPortUpdated &&
+                                !patchResult.serverXmlPatched && !patchResult.webXmlPatched &&
+                                !patchResult.persistencePatched && !patchResult.securityPatched &&
+                                patchResult.errors.isEmpty()
+                            ) {
                                 ConsoleUtil.print(console, project, "  Config files already up to date.\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             }
                         } else {
