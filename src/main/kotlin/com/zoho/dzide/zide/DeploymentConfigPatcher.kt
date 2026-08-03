@@ -59,13 +59,18 @@ object DeploymentConfigPatcher {
     fun patchAll(ctx: PatchContext, project: Project? = null): PatchResult {
         val errors = mutableListOf<String>()
 
-        // Case 2 experiment: no .orig restore / no Context patch — only rewrite 8443 SSL Connector
+        // No .orig restore (can wipe SSL). Rewrite HTTPS connector, then Context / Host patches.
         val restoredFromOrig = false
-        val serverXmlOk = false
         val httpsPortUpdated = try {
             ensureHttpsConnector(ctx)
         } catch (e: Exception) {
             errors.add("HTTPS connector: ${e.message}")
+            false
+        }
+        val serverXmlOk = try {
+            patchServerXml(ctx)
+        } catch (e: Exception) {
+            errors.add("server.xml: ${e.message}")
             false
         }
 
@@ -211,7 +216,7 @@ object DeploymentConfigPatcher {
 
         if (!content.contains("<Context ")) {
             val hostCloseTag = "</Host>"
-            val contextElement = """<Context docBase="${ctx.parentService}" path="" reloadable="true"/>"""
+            val contextElement = """<Context docBase="${ctx.parentService}" path="/" reloadable="true"/>"""
             content = content.replace(hostCloseTag, "$contextElement$hostCloseTag")
             modified = true
         }

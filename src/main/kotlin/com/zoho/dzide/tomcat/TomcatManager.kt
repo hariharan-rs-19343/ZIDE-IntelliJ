@@ -260,36 +260,58 @@ class TomcatManager(private val project: Project) : Disposable {
         val libDir = Path.of(server.path, "webapps", webappName, "WEB-INF", "lib")
         if (!libDir.toFile().exists()) return
 
-        val jars = libDir.toFile().listFiles()?.filter { it.extension == "jar" } ?: return
+        val jars = libDir.toFile().listFiles()?.filter { it.extension == "jar" }?.sortedBy { it.name } ?: return
         if (jars.isEmpty()) return
+
+        val desiredUrls = jars.map { "jar://${it.absolutePath}!/" }.toSet()
+        val libraryName = "ZIDE-WEB-INF-lib"
 
         ApplicationManager.getApplication().invokeAndWait {
             ApplicationManager.getApplication().runWriteAction {
                 try {
                     val libraryTable = LibraryTablesRegistrar.getInstance().getLibraryTable(project)
-                    val tableModel = libraryTable.modifiableModel
+                    var library = libraryTable.getLibraryByName(libraryName)
 
-                    tableModel.getLibraryByName("ZIDE-WEB-INF-lib")?.let { tableModel.removeLibrary(it) }
-
-                    val library = tableModel.createLibrary("ZIDE-WEB-INF-lib")
-                    val libModel = library.modifiableModel
-                    for (jar in jars) {
-                        libModel.addRoot("jar://${jar.absolutePath}!/", OrderRootType.CLASSES)
+                    if (library != null) {
+                        val currentUrls = library.getUrls(OrderRootType.CLASSES).toSet()
+                        if (currentUrls == desiredUrls) {
+                            log("Project library $libraryName already up to date (${jars.size} JAR(s)).")
+                        } else {
+                            val libModel = library.modifiableModel
+                            for (url in libModel.getUrls(OrderRootType.CLASSES)) {
+                                libModel.removeRoot(url, OrderRootType.CLASSES)
+                            }
+                            for (url in desiredUrls.sorted()) {
+                                libModel.addRoot(url, OrderRootType.CLASSES)
+                            }
+                            libModel.commit()
+                            log("Updated $libraryName in place (${jars.size} JAR(s) from WEB-INF/lib/).")
+                        }
+                    } else {
+                        val tableModel = libraryTable.modifiableModel
+                        library = tableModel.createLibrary(libraryName)
+                        val libModel = library!!.modifiableModel
+                        for (url in desiredUrls.sorted()) {
+                            libModel.addRoot(url, OrderRootType.CLASSES)
+                        }
+                        libModel.commit()
+                        tableModel.commit()
+                        log("Created $libraryName with ${jars.size} JAR(s) from WEB-INF/lib/.")
                     }
-                    libModel.commit()
-                    tableModel.commit()
 
+                    val resolvedLibrary = libraryTable.getLibraryByName(libraryName) ?: library ?: return@runWriteAction
                     for (module in ModuleManager.getInstance(project).modules) {
                         val rootModel = ModuleRootManager.getInstance(module).modifiableModel
                         val alreadyHas = rootModel.orderEntries.any {
-                            it is com.intellij.openapi.roots.LibraryOrderEntry && it.libraryName == "ZIDE-WEB-INF-lib"
+                            it is com.intellij.openapi.roots.LibraryOrderEntry && it.libraryName == libraryName
                         }
                         if (!alreadyHas) {
-                            rootModel.addLibraryEntry(library)
+                            rootModel.addLibraryEntry(resolvedLibrary)
+                            rootModel.commit()
+                        } else {
+                            rootModel.dispose()
                         }
-                        rootModel.commit()
                     }
-                    log("Configured ${jars.size} JAR(s) from WEB-INF/lib/ as project library.")
                 } catch (e: Exception) {
                     log("Failed to configure project libraries: ${e.message}")
                 }
