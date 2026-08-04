@@ -348,9 +348,25 @@ class TomcatManager(private val project: Project) : Disposable {
         val projectPath = project.basePath ?: return
         val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE")
             ?: ZideConfigParser.readZideConfig(projectPath)?.service?.properties?.get("ZIDE.PARENT_SERVICE")
-        val webappName = PathResolver.resolveWebappDirectory(server.path, parentService) ?: return
+        val webappName = PathResolver.resolveWebappDirectory(server.path, parentService) ?: run {
+            log("configureCompilerOutput: cannot resolve webapp directory for ${server.name}")
+            return
+        }
+        val modules = ModuleManager.getInstance(project).modules
+        if (modules.isEmpty()) {
+            log("configureCompilerOutput: no modules found in project, skipping")
+            return
+        }
         val outputPath = Path.of(server.path, "webapps", webappName, "WEB-INF", "classes")
-        if (!outputPath.exists()) return
+        if (!outputPath.exists()) {
+            try {
+                Files.createDirectories(outputPath)
+                log("Created WEB-INF/classes: $outputPath")
+            } catch (e: Exception) {
+                log("Failed to create WEB-INF/classes: ${e.message}")
+                return
+            }
+        }
 
         com.intellij.debugger.settings.DebuggerSettings.getInstance().RUN_HOTSWAP_AFTER_COMPILE =
             com.intellij.debugger.settings.DebuggerSettings.RUN_HOTSWAP_ALWAYS
@@ -488,6 +504,7 @@ class TomcatManager(private val project: Project) : Disposable {
         if (PortUtil.isPortInUse(server.port)) {
             log("Server ${server.name} is already running. Skipping debug start.")
             serverProvider.updateServer(server.id, mapOf("status" to "running", "debugPort" to debugPort))
+            configureCompilerOutputForDeployment(server)
             return
         }
 

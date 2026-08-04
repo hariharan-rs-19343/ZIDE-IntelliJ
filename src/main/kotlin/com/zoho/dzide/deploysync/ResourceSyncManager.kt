@@ -17,6 +17,12 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+import com.intellij.openapi.module.ModuleManager
+import com.intellij.openapi.roots.ModuleRootManager
+import com.zoho.dzide.zide.ZideConfigParser
 import kotlin.io.path.exists
 import kotlin.io.path.extension
 
@@ -27,17 +33,21 @@ class ResourceSyncManager(private val project: Project) : Disposable {
 
     var consoleView: ConsoleView? = null
 
-    private val lastExecutionByPath = ConcurrentHashMap<String, Long>()
+    private val debounceScheduler = Executors.newSingleThreadScheduledExecutor()
+    private val pendingByPath = ConcurrentHashMap<String, ScheduledFuture<*>>()
 
     private fun log(message: String) {
         val timestamped = "[${java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))}] $message\n"
         consoleView?.print(timestamped, ConsoleViewContentType.NORMAL_OUTPUT)
     }
 
-    private fun shouldDebounce(filePath: String): Boolean {
-        val now = System.currentTimeMillis()
-        val previous = lastExecutionByPath.put(filePath, now) ?: 0
-        return now - previous < 300
+    // Trailing debounce: cancels any pending action for the same path and reschedules 300ms out.
+    private fun scheduleDebounced(filePath: String, action: () -> Unit) {
+        pendingByPath.remove(filePath)?.cancel(false)
+        pendingByPath[filePath] = debounceScheduler.schedule({
+            pendingByPath.remove(filePath)
+            action()
+        }, 300, TimeUnit.MILLISECONDS)
     }
 
     private fun resolveProjectDirMacro(path: String): String {
@@ -175,7 +185,62 @@ class ResourceSyncManager(private val project: Project) : Disposable {
         }
     }
 
-    private fun runAutoCopyForFile(projectRoot: String, server: TomcatServer, filePath: String, projectName: String) {
+    /**
+     * Webapp folder for deploy sync destinations: ZIDE.PARENT_SERVICE from service.xml,
+     * not the IntelliJ project directory name.
+     */
+    private fun resolveParentServiceName(server: TomcatServer): String {
+        val fromRuntime = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE")?.trim()
+        if (!fromRuntime.isNullOrBlank()) return fromRuntime
+        val projectPath = project.basePath
+        if (!projectPath.isNullOrBlank()) {
+            val fromXml = ZideConfigParser.readZideConfig(projectPath)
+                ?.service?.properties?.get("ZIDE.PARENT_SERVICE")?.trim()
+            if (!fromXml.isNullOrBlank()) return fromXml
+        }
+        val folder = projectPath?.let { Path.of(it).fileName?.toString()?.trim() }
+        return folder?.takeIf { it.isNotEmpty() } ?: "ROOT"
+    }
+
+    /**
+     * Destinations under webapps/ must use PARENT_SERVICE as the webapp segment.
+     * e.g. webapps/zharehub/WEB-INF/... + parent=zharehub-intellij
+     *   -> webapps/zharehub-intellij/WEB-INF/...
+     */
+    private fun remapWebappsDestination(relativeDest: String, parentService: String): String {
+        val normalized = PathResolver.normalizePathSlashes(relativeDest).trimStart('/')
+        if (normalized == "webapps") return "webapps/$parentService"
+        if (!normalized.startsWith("webapps/")) return normalized
+        val rest = normalized.removePrefix("webapps/")
+        val slash = rest.indexOf('/')
+        return if (slash < 0) {
+            "webapps/$parentService"
+        } else {
+            "webapps/$parentService/${rest.substring(slash + 1)}"
+        }
+    }
+
+    private fun resolveAutoCopyDestination(
+        server: TomcatServer,
+        destinationPathTemplate: String,
+        subPath: String,
+        parentService: String
+    ): Path {
+        val destTemplate = PathResolver.applyProjectNamePlaceholder(destinationPathTemplate, parentService)
+        val relativeUnderTomcat = PathResolver.normalizePathSlashes(
+            Path.of(destTemplate).resolve(subPath).normalize().toString()
+        )
+        val remapped = remapWebappsDestination(relativeUnderTomcat, parentService)
+        return Path.of(server.path, remapped)
+    }
+
+    private fun runAutoCopyForFile(
+        projectRoot: String,
+        server: TomcatServer,
+        filePath: String,
+        projectName: String,
+        parentService: String
+    ) {
         val mappings = ModuleZidePropsParser.parseAutoCopyMappings(server.zideAutoResourceCopyRaw, projectName)
         var copied = false
         for (mapping in mappings) {
@@ -183,16 +248,14 @@ class ResourceSyncManager(private val project: Project) : Disposable {
             if (!PathResolver.isSubPath(sourceRoot, filePath)) continue
 
             val subPath = Path.of(sourceRoot).relativize(Path.of(filePath)).toString()
-            val destinationRoot = Path.of(
-                server.path,
-                PathResolver.applyProjectNamePlaceholder(mapping.destinationPathTemplate, projectName)
+            val destinationPath = resolveAutoCopyDestination(
+                server, mapping.destinationPathTemplate, subPath, parentService
             )
-            val destinationPath = destinationRoot.resolve(subPath)
 
             try {
                 Files.createDirectories(destinationPath.parent)
                 Files.copy(Path.of(filePath), destinationPath, StandardCopyOption.REPLACE_EXISTING)
-                log("Copied resource: $filePath -> $destinationPath")
+                log("Auto-copy PARENT_SERVICE=$parentService; copied: $filePath -> $destinationPath")
                 copied = true
             } catch (e: Exception) {
                 log("Resource copy failed for $filePath: ${e.message}")
@@ -209,7 +272,11 @@ class ResourceSyncManager(private val project: Project) : Disposable {
             val debuggerManager = com.intellij.debugger.DebuggerManagerEx.getInstanceEx(project)
             val sessions = debuggerManager.sessions
             if (sessions.isEmpty()) {
-                log("No active debug session — hot-swap skipped. Changes will take effect after restart.")
+                log(
+                    "No active debug session — hot-swap skipped. " +
+                        "Classes must land in WEB-INF/classes (compiler output); " +
+                        "restart or Tomcat reloadable will pick them up."
+                )
                 return@invokeLater
             }
             for (session in sessions) {
@@ -221,8 +288,10 @@ class ResourceSyncManager(private val project: Project) : Disposable {
     }
 
     fun handleDocumentSave(filePath: String) {
-        if (shouldDebounce(filePath)) return
+        scheduleDebounced(filePath) { doHandleDocumentSave(filePath) }
+    }
 
+    private fun doHandleDocumentSave(filePath: String) {
         val projectRoot = project.basePath
         if (projectRoot == null) {
             ideaLog.debug("Deploy sync: project.basePath is null for ${project.name}")
@@ -242,6 +311,9 @@ class ResourceSyncManager(private val project: Project) : Disposable {
 
         val fileExtension = Path.of(filePath).extension
         if (fileExtension == "java") {
+            // Java is not auto-copied. IntelliJ compiles into WEB-INF/classes when
+            // TomcatManager redirected compiler output; hot-swap updates the live JVM.
+            log("Java change: ${Path.of(filePath).fileName} — relying on compiler output under WEB-INF/classes")
             triggerHotSwap()
             return
         }
@@ -270,42 +342,131 @@ class ResourceSyncManager(private val project: Project) : Disposable {
         if (refreshed.zideAutoResourceCopyRaw.isNullOrBlank()) {
             log("No auto-copy mappings configured. Skipping resource copy for: ${Path.of(filePath).fileName}")
         } else {
-            runAutoCopyForFile(projectRoot, refreshed, filePath, projectDirectoryName)
+            val parentService = resolveParentServiceName(refreshed)
+            runAutoCopyForFile(projectRoot, refreshed, filePath, projectDirectoryName, parentService)
         }
     }
 
     fun handleFileDelete(filePath: String) {
+        scheduleDebounced(filePath) { doHandleFileDelete(filePath) }
+    }
+
+    private fun doHandleFileDelete(filePath: String) {
         val projectRoot = project.basePath ?: return
-        val server = getServerForProject() ?: return
+        val server = getServerForProject()
+        if (server == null) {
+            log("Deploy sync delete skipped: no server configured for this project.")
+            return
+        }
         val resolved = resolveServerMacros(server)
+        val refreshed = refreshServerFromZideProperties(resolved)
         val projectDirectoryName = Path.of(projectRoot).fileName.toString()
+        val m19ProjectName = refreshed.repositoryModuleDir ?: projectDirectoryName
 
-        val mappings = ModuleZidePropsParser.parseAutoCopyMappings(resolved.zideAutoResourceCopyRaw, projectDirectoryName)
-        for (mapping in mappings) {
-            val sourceRoot = Path.of(projectRoot, mapping.sourcePath).toString()
-            if (!PathResolver.isSubPath(sourceRoot, filePath)) continue
+        val relativePath = PathResolver.stripProjectPrefix(
+            PathResolver.toProjectRelativePath(projectRoot, filePath), m19ProjectName
+        )
+        val hookMappings = ModuleZidePropsParser.parseHookTaskMappings(refreshed.zideHookTasksRaw, m19ProjectName)
+        var hookMatched = false
+        for (mapping in hookMappings) {
+            if (!isPathWithinFolder(relativePath, mapping.folder)) continue
+            hookMatched = true
+            val deltaResourcesPath = PathResolver.normalizePathSlashes("$projectDirectoryName/${mapping.folder}")
+            val deltaResources = PathResolver.normalizePathSlashes(
+                Path.of(mapping.folder).relativize(Path.of(relativePath)).toString()
+            ).ifEmpty { "null" }
+            runAntTarget(projectRoot, refreshed, mapping.antTarget, deltaResourcesPath, deltaResources)
+        }
+        if (!hookMatched && hookMappings.isNotEmpty()) {
+            log("No hook mapping matched for: $relativePath")
+        }
 
-            val subPath = Path.of(sourceRoot).relativize(Path.of(filePath)).toString()
-            val destinationRoot = Path.of(
-                resolved.path,
-                PathResolver.applyProjectNamePlaceholder(mapping.destinationPathTemplate, projectDirectoryName)
-            )
-            val destinationPath = destinationRoot.resolve(subPath)
-
-            if (destinationPath.exists()) {
-                try {
-                    Files.delete(destinationPath)
-                    log("Deleted from deployment: $destinationPath")
-                    ideaLog.info("Deploy sync: deleted $destinationPath (source: $filePath)")
-                } catch (e: Exception) {
-                    log("Failed to delete from deployment: $destinationPath — ${e.message}")
+        val mappings = ModuleZidePropsParser.parseAutoCopyMappings(refreshed.zideAutoResourceCopyRaw, projectDirectoryName)
+        if (mappings.isEmpty()) {
+            log("No auto-copy mappings configured. Skipping delete sync for: ${Path.of(filePath).fileName}")
+        } else {
+            val parentService = resolveParentServiceName(refreshed)
+            var matched = false
+            for (mapping in mappings) {
+                val sourceRoot = Path.of(projectRoot, mapping.sourcePath).toString()
+                if (!PathResolver.isSubPath(sourceRoot, filePath)) continue
+                matched = true
+                val subPath = Path.of(sourceRoot).relativize(Path.of(filePath)).toString()
+                val destinationPath = resolveAutoCopyDestination(
+                    refreshed, mapping.destinationPathTemplate, subPath, parentService
+                )
+                if (destinationPath.exists()) {
+                    try {
+                        Files.delete(destinationPath)
+                        log("Auto-copy PARENT_SERVICE=$parentService; deleted: $destinationPath")
+                        ideaLog.info("Deploy sync: deleted $destinationPath (source: $filePath)")
+                    } catch (e: Exception) {
+                        log("Failed to delete from deployment: $destinationPath — ${e.message}")
+                    }
                 }
+            }
+            if (!matched) {
+                log("No auto-copy mapping matched for delete: ${Path.of(filePath).fileName}")
+            }
+        }
+
+        if (Path.of(filePath).extension == "java") {
+            deleteClassesForJavaFile(filePath, refreshed)
+        }
+    }
+
+    private fun deleteClassesForJavaFile(filePath: String, server: TomcatServer) {
+        val parentService = resolveParentServiceName(server)
+        val webappName = PathResolver.resolveWebappDirectory(server.path, parentService) ?: return
+        val classesDir = Path.of(server.path, "webapps", webappName, "WEB-INF", "classes")
+        if (!classesDir.exists()) return
+
+        val javaFilePath = Path.of(filePath)
+        ApplicationManager.getApplication().runReadAction {
+            var handled = false
+            for (module in ModuleManager.getInstance(project).modules) {
+                if (handled) break
+                for (sourceRoot in ModuleRootManager.getInstance(module).sourceRoots) {
+                    val sourceRootPath = Path.of(sourceRoot.path)
+                    if (!javaFilePath.startsWith(sourceRootPath)) continue
+                    val relPath = sourceRootPath.relativize(javaFilePath)
+                    val classRelPath = relPath.toString().removeSuffix(".java")
+                    val classFile = classesDir.resolve("$classRelPath.class")
+                    if (classFile.exists()) {
+                        try {
+                            Files.delete(classFile)
+                            log("Deleted class: $classFile")
+                        } catch (e: Exception) {
+                            log("Failed to delete class: $classFile — ${e.message}")
+                        }
+                    }
+                    val simpleClassName = javaFilePath.fileName.toString().removeSuffix(".java")
+                    val packageDir = classesDir.resolve(relPath.parent ?: Path.of(""))
+                    if (packageDir.exists()) {
+                        packageDir.toFile().listFiles { _, name ->
+                            name.startsWith("${simpleClassName}\$") && name.endsWith(".class")
+                        }?.forEach { innerClass ->
+                            try {
+                                Files.delete(innerClass.toPath())
+                                log("Deleted inner class: ${innerClass.name}")
+                            } catch (e: Exception) {
+                                log("Failed to delete inner class: ${innerClass.name} — ${e.message}")
+                            }
+                        }
+                    }
+                    handled = true
+                    break
+                }
+            }
+            if (!handled) {
+                log("No source root found for deleted Java file: ${javaFilePath.fileName}")
             }
         }
     }
 
     override fun dispose() {
-        lastExecutionByPath.clear()
+        pendingByPath.values.forEach { it.cancel(false) }
+        debounceScheduler.shutdownNow()
     }
 
     companion object {

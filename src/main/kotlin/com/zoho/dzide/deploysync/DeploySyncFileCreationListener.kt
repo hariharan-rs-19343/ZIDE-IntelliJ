@@ -19,8 +19,9 @@ class DeploySyncFileCreationListener : BulkFileListener {
             val file = event.file
             if (file.isDirectory) continue
 
+            // Ignore compiled class events (avoid loops). Java deletes sync .class cleanup.
             val ext = file.extension
-            if (ext == "java" || ext == "class") continue
+            if (ext == "class") continue
 
             val filePath = file.path
             log.info("Deploy sync: delete detected — $filePath")
@@ -28,7 +29,7 @@ class DeploySyncFileCreationListener : BulkFileListener {
             for (project in ProjectManager.getInstance().openProjects) {
                 if (project.isDisposed) continue
                 val basePath = project.basePath ?: continue
-                if (filePath.startsWith(basePath)) {
+                if (belongsToProject(filePath, basePath)) {
                     ResourceSyncManager.getInstance(project).handleFileDelete(filePath)
                     break
                 }
@@ -41,7 +42,8 @@ class DeploySyncFileCreationListener : BulkFileListener {
             if (event !is VFileCreateEvent && event !is VFileMoveEvent && event !is VFileContentChangeEvent) continue
 
             val filePath = event.path
-            if (filePath.endsWith("/") || filePath.endsWith(".java") || filePath.endsWith(".class")) continue
+            // Skip directories and compiled .class (avoid copy/hot-swap loops). Allow .java.
+            if (filePath.endsWith("/") || filePath.endsWith(".class")) continue
 
             val file = event.file
             if (file != null && file.isDirectory) continue
@@ -51,11 +53,18 @@ class DeploySyncFileCreationListener : BulkFileListener {
             for (project in ProjectManager.getInstance().openProjects) {
                 if (project.isDisposed) continue
                 val basePath = project.basePath ?: continue
-                if (filePath.startsWith(basePath)) {
+                if (belongsToProject(filePath, basePath)) {
                     ResourceSyncManager.getInstance(project).handleDocumentSave(filePath)
                     break
                 }
             }
         }
+    }
+
+    /** Match project root with a path boundary so sibling folders are not claimed. */
+    private fun belongsToProject(filePath: String, basePath: String): Boolean {
+        if (filePath == basePath) return true
+        val prefix = if (basePath.endsWith("/")) basePath else "$basePath/"
+        return filePath.startsWith(prefix)
     }
 }

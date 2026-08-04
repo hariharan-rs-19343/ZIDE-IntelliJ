@@ -68,6 +68,9 @@
             <li>NPW open hang — New Project Wizard path no longer double-opens the project after Deployment Properties</li>
             <li>Empty Modules fix — after create, load the written .iml into ModuleManager; clone into open NPW dirs via temp swap instead of deleting the project basePath</li>
             <li>Source roots — detect real source folders (SourceFolderDetector) for .iml and ZIDE.SOURCES instead of hardcoding src/main/java</li>
+            <li>Deploy sync — trailing debounce for create/save; delete runs hooks + reverse auto-copy; Java delete removes WEB-INF/classes; Java save triggers hot-swap</li>
+            <li>Auto-copy webapp path — destinations under webapps/ use ZIDE.PARENT_SERVICE (not repo folder name / project dir)</li>
+            <li>Compiler output — create WEB-INF/classes if missing and redirect module output so debug hot-swap and restart share the same classes</li>
         </ul>
         <b>0.0.7</b>
         <ul>
