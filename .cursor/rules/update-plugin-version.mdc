@@ -28,15 +28,42 @@ Derive bullets from `git log` / diffs since the last version tag or previous cha
 
 ## 3. Draft a git release note
 
-In the reply to the user, draft a GitHub release body ready to paste (or for `gh release create`), including:
+In the reply to the user, draft a GitHub release body matching the **V0.0.8** style (tag/title `V{version}`). Use this structure:
 
-- Title suggestion: `V{version}` or `v{version}`
-- Summary (1–3 sentences)
-- Highlight bullets (same substance as changelog)
-- Install note: zip name `zide-intelliJ-plugin-{version}.zip`
-- Optional: `## Test plan` checklist
+```markdown
+## ZIDE IntelliJ Plugin v{version}
 
-Do **not** create a git tag, GitHub release, or commit unless the user explicitly asks.
+IntelliJ IDEA plugin for Zoho ZIDE workflows — project create, Tomcat lifecycle, deploy sync, and debug.
+
+**Requires:** IntelliJ IDEA 2024.3+ (Community or Ultimate)
+
+### Highlights
+
+- **Short headline** — one-line benefit (3 bullets typical)
+
+### What's new
+
+#### Debug
+- bullet…
+
+#### Compiler / deploy sync
+- bullet…
+
+#### New project / create
+- bullet… (omit empty sections)
+
+### Install
+
+1. Download `zide-intelliJ-plugin-{version}.zip` from this release
+2. IntelliJ → **Settings → Plugins → ⚙️ → Install Plugin from Disk…**
+3. Select the zip → restart the IDE
+
+### Notes
+
+- recovery / environment caveats if relevant
+```
+
+Do **not** use a bare Summary + Test plan checklist unless the user asks. Do **not** create a git tag, GitHub release, or commit unless the user explicitly asks.
 
 ## After the three steps
 
