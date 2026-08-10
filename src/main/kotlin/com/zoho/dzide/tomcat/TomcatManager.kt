@@ -3,6 +3,7 @@ package com.zoho.dzide.tomcat
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.ui.ConsoleView
 import com.intellij.execution.ui.ConsoleViewContentType
+import com.intellij.execution.RunManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -344,7 +345,7 @@ class TomcatManager(private val project: Project) : Disposable {
         }
     }
 
-    private fun configureCompilerOutputForDeployment(server: TomcatServer) {
+    fun configureCompilerOutputForDeployment(server: TomcatServer) {
         val projectPath = project.basePath ?: return
         val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE")
             ?: ZideConfigParser.readZideConfig(projectPath)?.service?.properties?.get("ZIDE.PARENT_SERVICE")
@@ -357,7 +358,16 @@ class TomcatManager(private val project: Project) : Disposable {
             log("configureCompilerOutput: no modules found in project, skipping")
             return
         }
-        val outputPath = Path.of(server.path, "webapps", webappName, "WEB-INF", "classes")
+        // Only redirect into a real deployed webapp — never invent webapps/{name}/WEB-INF.
+        val webinfDir = Path.of(server.path, "webapps", webappName, "WEB-INF")
+        if (!webinfDir.exists()) {
+            log(
+                "configureCompilerOutput: WEB-INF missing at $webinfDir — " +
+                    "skipping redirect (avoid phantom empty webapp)"
+            )
+            return
+        }
+        val outputPath = webinfDir.resolve("classes")
         if (!outputPath.exists()) {
             try {
                 Files.createDirectories(outputPath)
@@ -366,6 +376,13 @@ class TomcatManager(private val project: Project) : Disposable {
                 log("Failed to create WEB-INF/classes: ${e.message}")
                 return
             }
+        }
+
+        // WAR-deployed classes live here; clearing on rebuild would wipe them → 404.
+        val compilerConfig = com.intellij.compiler.CompilerWorkspaceConfiguration.getInstance(project)
+        if (compilerConfig.CLEAR_OUTPUT_DIRECTORY) {
+            compilerConfig.CLEAR_OUTPUT_DIRECTORY = false
+            log("Disabled Clear output directory on rebuild (protects deployment WEB-INF/classes)")
         }
 
         com.intellij.debugger.settings.DebuggerSettings.getInstance().RUN_HOTSWAP_AFTER_COMPILE =
@@ -377,15 +394,30 @@ class TomcatManager(private val project: Project) : Disposable {
                 for (module in ModuleManager.getInstance(project).modules) {
                     val model = ModuleRootManager.getInstance(module).modifiableModel
                     val ext = model.getModuleExtension(CompilerModuleExtension::class.java)
-                    if (ext != null && ext.compilerOutputUrl != outputUrl) {
-                        ext.setCompilerOutputPath(outputUrl)
+                    if (ext == null) {
+                        model.dispose()
+                        continue
+                    }
+                    val needsUpdate = ext.isCompilerOutputPathInherited ||
+                        ext.compilerOutputUrl != outputUrl ||
+                        ext.compilerOutputUrlForTests != outputUrl
+                    if (needsUpdate) {
                         ext.inheritCompilerOutputPath(false)
+                        ext.setCompilerOutputPath(outputUrl)
+                        ext.setCompilerOutputPathForTests(outputUrl)
                         model.commit()
                         log("Set compiler output to: $outputPath")
                     } else {
                         model.dispose()
                     }
                 }
+            }
+            // Persist .iml so disk matches Project Structure (inherit=false + WEB-INF/classes).
+            try {
+                com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().saveAllDocuments()
+                com.intellij.ide.SaveAndSyncHandler.getInstance().scheduleProjectSave(project)
+            } catch (e: Exception) {
+                log("configureCompilerOutput: scheduleProjectSave failed: ${e.message}")
             }
         }
     }
@@ -561,11 +593,22 @@ class TomcatManager(private val project: Project) : Disposable {
     }
 
     fun stopServer(server: TomcatServer) {
+        // Always tear down IDE debug session / temp run config first, even if HTTP
+        // port already looks free (zombie JDWP / Remote Debug tab after a crash).
+        disconnectDebugSession(server)
+        removeDebugRunConfig(server)
+
         if (!PortUtil.isPortInUse(server.port)) {
             log("Server ${server.name} is not running on port ${server.port}")
+            // Still clear leftover JDWP listener if present
+            val dp = server.debugPort
+            if (dp != null && dp > 0 && PortUtil.isPortInUse(dp)) {
+                log("HTTP port free but debug port $dp still in use — force killing")
+                forceKillByPort(dp)
+            }
             NotificationUtil.warn(project, "Server ${server.name} is not running!")
             serverProcesses.remove(server.id)
-            serverProvider.updateServer(server.id, mapOf("status" to "stopped"))
+            serverProvider.updateServer(server.id, mapOf("status" to "stopped", "debugPort" to null))
             return
         }
 
@@ -601,6 +644,7 @@ class TomcatManager(private val project: Project) : Disposable {
         }
 
         // Verify shutdown, fallback to lsof + kill if still running
+        val debugPort = server.debugPort
         Thread {
             Thread.sleep(3000)
             var stillRunning = PortUtil.isPortInUse(server.port)
@@ -610,8 +654,14 @@ class TomcatManager(private val project: Project) : Disposable {
                 Thread.sleep(2000)
                 stillRunning = PortUtil.isPortInUse(server.port)
             }
+            // Ensure JDWP debug port is also gone (same JVM usually, but catalina
+            // fallback / partial kills can leave the listener behind).
+            if (debugPort != null && debugPort > 0 && PortUtil.isPortInUse(debugPort)) {
+                log("Force-killing debug port $debugPort for ${server.name}")
+                forceKillByPort(debugPort)
+            }
             if (!stillRunning) {
-                serverProvider.updateServer(server.id, mapOf("status" to "stopped"))
+                serverProvider.updateServer(server.id, mapOf("status" to "stopped", "debugPort" to null))
                 log("Server ${server.name} stopped successfully!")
                 NotificationUtil.info(project, "Tomcat server ${server.name} stopped successfully!")
             } else {
@@ -620,6 +670,41 @@ class TomcatManager(private val project: Project) : Disposable {
                 NotificationUtil.error(project, "Failed to stop server ${server.name}. Manual intervention required.")
             }
         }.start()
+    }
+
+    private fun disconnectDebugSession(server: TomcatServer) {
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            try {
+                val debuggerManager = com.intellij.debugger.DebuggerManagerEx.getInstanceEx(project)
+                for (session in debuggerManager.sessions) {
+                    if (session.sessionName.contains(server.name, ignoreCase = true)) {
+                        session.xDebugSession?.stop()
+                        log("Disconnected debug session: ${session.sessionName}")
+                    }
+                }
+            } catch (ex: Exception) {
+                logError("Failed to disconnect debug session: ${ex.message}")
+            }
+        }
+    }
+
+    private fun removeDebugRunConfig(server: TomcatServer) {
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            try {
+                val runManager = RunManager.getInstance(project)
+                val configName = "Debug ${server.name}"
+                runManager.allSettings
+                    .filter { it.name == configName && it.isTemporary }
+                    .forEach {
+                        runManager.removeConfiguration(it)
+                        log("Removed temporary debug run config: $configName")
+                    }
+            } catch (ex: Exception) {
+                logError("Failed to remove debug run config: ${ex.message}")
+            }
+        }
     }
 
     private fun forceKillByPort(port: Int) {

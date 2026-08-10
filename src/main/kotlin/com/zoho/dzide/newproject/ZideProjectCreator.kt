@@ -15,8 +15,10 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.pom.java.LanguageLevel
 import com.zoho.dzide.debug.DebuggerAttachUtil
+import com.zoho.dzide.parser.PathResolver
 import com.zoho.dzide.parser.SourceFolderDetector
 import com.zoho.dzide.settings.ZideSettingsState
+import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.DeploymentPropertiesDialog
@@ -181,7 +183,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             // Step 10b: Configure IntelliJ module (natures/classpath equivalent)
             indicator.text = "Configuring project module..."
             indicator.fraction = 0.70
-            writeModuleIml(projectDir, result)
+            writeModuleIml(projectDir, result, deploymentDir, deployServiceName)
             writeModulesXml(projectDir, result)
 
             // Step 10c: Post-creation + zide-module hooks
@@ -210,7 +212,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             indicator.text = "Configuring project module..."
             indicator.fraction = 0.85
             writeLibraryConfig(projectDir, deploymentDir, result)
-            writeModuleIml(projectDir, result)
+            writeModuleIml(projectDir, result, deploymentDir, deployServiceName)
             writeModulesXml(projectDir, result)
             writeProjectSdkConfig(projectDir, result)
 
@@ -993,7 +995,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 project, projectDir.absolutePath, interactive = false
             ) ?: return
             val provider = com.zoho.dzide.tomcat.TomcatServerProvider.getInstance(project)
-            if (provider.getServers().none { it.path == server.path }) {
+            val registered = provider.getServers().firstOrNull { it.path == server.path } ?: run {
                 provider.addServer(server)
                 provider.setProjectMapping(
                     com.zoho.dzide.model.ProjectServerMapping(
@@ -1004,6 +1006,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                     )
                 )
                 log.info("Auto-registered Tomcat server '${server.name}'")
+                server
             }
 
             val module = com.intellij.openapi.module.ModuleManager.getInstance(project).modules.firstOrNull()
@@ -1014,6 +1017,9 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                         .linkDeploymentLibraries(webapp.absolutePath, module)
                 }
             }
+
+            // Live ModuleRootManager redirect (NPW already-open projects ignore disk .iml alone).
+            TomcatManager.getInstance(project).configureCompilerOutputForDeployment(registered)
         } catch (e: Exception) {
             log.warn("Failed to auto-register Tomcat / link dependencies", e)
         }
@@ -1098,16 +1104,59 @@ $roots
         log.info("Wrote project library ZIDE-WEB-INF-lib (${libDir.listFiles()?.count { it.extension == "jar" } ?: 0} jars)")
     }
 
-    private fun writeModuleIml(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {
+    /**
+     * Resolves deployment WEB-INF/classes for compiler output. Prefers
+     * webapps/{deployServiceName}, then PathResolver scan of Tomcat webapps.
+     * Requires an existing WEB-INF directory — never invents a phantom webapp tree.
+     */
+    private fun resolveDeploymentClassesDir(deploymentDir: File, deployServiceName: String): File? {
+        val tomcatPath = File(deploymentDir, "AdventNet/Sas/tomcat")
+        if (!tomcatPath.isDirectory) return null
+
+        val preferredWebInf = File(tomcatPath, "webapps/$deployServiceName/WEB-INF")
+        if (preferredWebInf.isDirectory) {
+            val classes = File(preferredWebInf, "classes")
+            if (!classes.exists()) classes.mkdirs()
+            return classes
+        }
+
+        val webappName = PathResolver.resolveWebappDirectory(tomcatPath.absolutePath, deployServiceName)
+            ?: return null
+        val webinf = File(tomcatPath, "webapps/$webappName/WEB-INF")
+        if (!webinf.isDirectory) {
+            log.warn("resolveDeploymentClassesDir: WEB-INF missing under webapps/$webappName — skipping")
+            return null
+        }
+        val classes = File(webinf, "classes")
+        if (!classes.exists()) classes.mkdirs()
+        return classes
+    }
+
+    private fun writeModuleIml(
+        projectDir: File,
+        result: ZideProjectWizardDialog.WizardResult,
+        deploymentDir: File,
+        deployServiceName: String
+    ) {
         val moduleName = result.name
         val imlFile = File(projectDir, "$moduleName.iml")
         val sourceFolders = SourceFolderDetector.detect(projectDir).ifEmpty { listOf("src/main/java") }
+        val classesDir = resolveDeploymentClassesDir(deploymentDir, deployServiceName)
+        val inheritOutput = classesDir == null
 
         val iml = buildString {
             appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
             appendLine("""<module type="JAVA_MODULE" version="4">""")
-            appendLine("""  <component name="NewModuleRootManager" inherit-compiler-output="true">""")
-            appendLine("""    <exclude-output />""")
+            if (inheritOutput) {
+                appendLine("""  <component name="NewModuleRootManager" inherit-compiler-output="true">""")
+                appendLine("""    <exclude-output />""")
+            } else {
+                val outputUrl = "file://${classesDir!!.absolutePath}"
+                appendLine("""  <component name="NewModuleRootManager" inherit-compiler-output="false">""")
+                appendLine("""    <output url="$outputUrl" />""")
+                appendLine("""    <output-test url="$outputUrl" />""")
+                appendLine("""    <exclude-output />""")
+            }
             appendLine("""    <content url="file://${'$'}MODULE_DIR${'$'}">""")
             for (sources in sourceFolders) {
                 appendLine("""      <sourceFolder url="file://${'$'}MODULE_DIR${'$'}/$sources" isTestSource="false" />""")
@@ -1120,7 +1169,14 @@ $roots
             appendLine("""</module>""")
         }
         imlFile.writeText(iml)
-        log.info("Wrote module $moduleName.iml with sources: ${sourceFolders.joinToString()}")
+        if (inheritOutput) {
+            log.info("Wrote module $moduleName.iml with sources: ${sourceFolders.joinToString()} (inherit project out)")
+        } else {
+            log.info(
+                "Wrote module $moduleName.iml with sources: ${sourceFolders.joinToString()}, " +
+                    "compiler output: ${classesDir!!.absolutePath}"
+            )
+        }
     }
 
     private fun writeModulesXml(projectDir: File, result: ZideProjectWizardDialog.WizardResult) {

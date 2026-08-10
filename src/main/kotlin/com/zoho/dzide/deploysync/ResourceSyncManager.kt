@@ -266,27 +266,6 @@ class ResourceSyncManager(private val project: Project) : Disposable {
         }
     }
 
-    private fun triggerHotSwap() {
-        ApplicationManager.getApplication().invokeLater {
-            if (project.isDisposed) return@invokeLater
-            val debuggerManager = com.intellij.debugger.DebuggerManagerEx.getInstanceEx(project)
-            val sessions = debuggerManager.sessions
-            if (sessions.isEmpty()) {
-                log(
-                    "No active debug session — hot-swap skipped. " +
-                        "Classes must land in WEB-INF/classes (compiler output); " +
-                        "restart or Tomcat reloadable will pick them up."
-                )
-                return@invokeLater
-            }
-            for (session in sessions) {
-                val hotSwapManager = com.intellij.debugger.ui.HotSwapUI.getInstance(project)
-                hotSwapManager.reloadChangedClasses(session, false)
-                log("Hot-swap triggered for debug session: ${session.sessionName}")
-            }
-        }
-    }
-
     fun handleDocumentSave(filePath: String) {
         scheduleDebounced(filePath) { doHandleDocumentSave(filePath) }
     }
@@ -312,9 +291,13 @@ class ResourceSyncManager(private val project: Project) : Disposable {
         val fileExtension = Path.of(filePath).extension
         if (fileExtension == "java") {
             // Java is not auto-copied. IntelliJ compiles into WEB-INF/classes when
-            // TomcatManager redirected compiler output; hot-swap updates the live JVM.
-            log("Java change: ${Path.of(filePath).fileName} — relying on compiler output under WEB-INF/classes")
-            triggerHotSwap()
+            // TomcatManager redirected compiler output. Do NOT call hot-swap here —
+            // compilation has not finished yet. RUN_HOTSWAP_ALWAYS (set in
+            // configureCompilerOutputForDeployment) triggers hot-swap after compile.
+            log(
+                "Java change: ${Path.of(filePath).fileName} — relying on compiler output " +
+                    "under WEB-INF/classes + RUN_HOTSWAP_ALWAYS after compile"
+            )
             return
         }
 
