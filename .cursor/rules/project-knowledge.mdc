@@ -7,10 +7,10 @@ alwaysApply: true
 
 ## Project Identity
 - Plugin ID: `com.zoho.dzide`
-- Current Version: 0.0.7
-- Language: Kotlin 1.9.25, JVM 17
-- Build: Gradle 8.12 (Kotlin DSL), IntelliJ Platform Plugin 2.5.0
-- Target IDE: IntelliJ IDEA 2024.1.7+ (Community or Ultimate)
+- Current Version: 0.0.9
+- Language: Kotlin 2.2.0, JVM 21
+- Build: Gradle 9.0 (Kotlin DSL), IntelliJ Platform Plugin 2.16.0
+- Target IDE: IntelliJ IDEA 2024.3+ (Community or Ultimate)
 - Build command: `./gradlew clean buildPlugin`
 - Output zip: `build/distributions/zide-intelliJ-plugin-{version}.zip`
 - Version defined in: `gradle.properties` (`pluginVersion`)

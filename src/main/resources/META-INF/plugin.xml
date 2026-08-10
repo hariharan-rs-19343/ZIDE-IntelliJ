@@ -53,6 +53,15 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.0.9</b>
+        <ul>
+            <li>Debug attach reliability — wait for JPDA port via lsof (up to 60s) instead of a fixed 3s delay; fixes "Unable to open debugger port … Connection refused"</li>
+            <li>Stop cleans up debug — disconnect Remote debug session, remove temporary Debug run config, force-kill leftover JDWP port</li>
+            <li>Protect deployment classes — disable Clear output directory on rebuild when compiler output is WEB-INF/classes (prevents 404 after Rebuild)</li>
+            <li>Create-time compiler output — .iml points at deployment WEB-INF/classes (inherit off) when the webapp exists; live redirect after Tomcat register</li>
+            <li>Hot-swap timing — rely on RUN_HOTSWAP_ALWAYS after compile; no premature hot-swap on .java save</li>
+            <li>Multi-module debug — attach Remote config to the module whose output is WEB-INF/classes</li>
+        </ul>
         <b>0.0.8</b>
         <ul>
             <li>Debug startup breakpoints — JPDA_SUSPEND=y causes the JVM to halt until the debugger attaches; breakpoints in service startup code (ZhareHubService.start(), Util.setSystemProperties(), etc.) are now hit</li>

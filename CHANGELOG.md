@@ -4,6 +4,21 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 
 ---
 
+## [0.0.9] — 2026-08-10
+
+### Fixed
+- **Debug attach "Connection refused"** — debugger attach no longer uses a fixed 3s delay. It polls with `lsof` until the JPDA port is bound (up to 60s), then attaches. Avoids attaching before pre-start compile/patch finishes.
+- **Stop leaves debug port alive** — Stop disconnects the IDE Remote debug session, removes the temporary `Debug {server}` run config, and force-kills the JDWP port if it survives process teardown.
+- **404 after compiler-output redirect** — when module output points at deployment `WEB-INF/classes`, IntelliJ’s “Clear output directory on rebuild” is disabled so WAR-deployed product classes are not wiped on Rebuild.
+- **Premature hot-swap on Java save** — removed save-time `triggerHotSwap()` that raced compilation; rely on `RUN_HOTSWAP_ALWAYS` after compile completes.
+- **Wrong debug module on multi-module projects** — Remote debug config prefers the module whose compiler output is `WEB-INF/classes` instead of `modules.first()`.
+
+### Changed
+- **Create-time compiler output** — new projects write `.iml` with `inherit-compiler-output="false"` and output URL set to deployment `WEB-INF/classes` when the webapp exists; live ModuleRootManager redirect runs after Tomcat registration.
+- **Safer webapp output path** — compiler redirect only applies when `webapps/{service}/WEB-INF` already exists (no phantom empty webapp directories).
+
+---
+
 ## [0.0.8] — 2026-07-19
 
 ### Fixed
