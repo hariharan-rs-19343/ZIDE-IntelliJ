@@ -48,10 +48,33 @@ object PathResolver {
         return normalizeRelativeForMatch(relative)
     }
 
-    fun findDefaultZideFolder(projectPath: String): String? {
-        val parentPath = Path.of(projectPath).toAbsolutePath().normalize().parent ?: return null
-        val candidate = parentPath.resolve("zide")
+    fun findDefaultZideFolder(projectPath: String): String? =
+        resolveZideConfigRepoFromProject(projectPath)
+
+    /** `{workspace}/zide` when that directory exists. */
+    fun resolveZideConfigRepoFromWorkspace(workspacePath: String): String? {
+        val candidate = Path.of(workspacePath, "zide")
         return if (candidate.exists() && candidate.isDirectory()) candidate.toString() else null
+    }
+
+    /** Sibling `{parent(project)}/zide` — Eclipse workspace clone location. */
+    fun resolveZideConfigRepoFromProject(projectPath: String): String? {
+        val parentPath = Path.of(projectPath).toAbsolutePath().normalize().parent ?: return null
+        return resolveZideConfigRepoFromWorkspace(parentPath.toString())
+    }
+
+    fun resolveModuleRecipeDir(zideRepo: String, moduleDir: String, deployType: String = "M19"): String =
+        Path.of(zideRepo, "deployment", moduleDir, deployType).toString()
+
+    /**
+     * Eclipse `getDeploymentPath()` for M19: `{deploymentFolder}/{serverHome}`.
+     * [serverHome] is `deploy.folder.basepath` (default `AdventNet/Sas/tomcat`).
+     */
+    fun resolveTomcatHome(deploymentFolder: String, serverHome: String? = null): String {
+        val relative = serverHome?.replace('\\', '/')?.trim()?.trimStart('/')?.ifEmpty { null }
+            ?: "AdventNet/Sas/tomcat"
+        val parts = relative.split('/').filter { it.isNotEmpty() }.toTypedArray()
+        return Path.of(deploymentFolder, *parts).toString()
     }
 
     /**

@@ -74,6 +74,8 @@ class TomcatToolWindowFactory : ToolWindowFactory {
             val appLogsActions = DefaultActionGroup()
             val refreshAppLogs = ActionManager.getInstance().getAction("dzide.RefreshAppLogs")
             if (refreshAppLogs != null) appLogsActions.add(refreshAppLogs)
+            val clearAppLogs = ActionManager.getInstance().getAction("dzide.ClearAppLogs")
+            if (clearAppLogs != null) appLogsActions.add(clearAppLogs)
             appLogsActions.addSeparator()
             appLogsActions.addAll(*appLogsConsole.createConsoleActions())
             val appLogsToolbar = ActionManager.getInstance().createActionToolbar("AppLogsConsole", appLogsActions, false)

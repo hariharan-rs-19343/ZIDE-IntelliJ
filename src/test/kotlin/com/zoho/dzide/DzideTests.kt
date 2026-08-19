@@ -139,4 +139,22 @@ class PathResolverTest {
         assertEquals("webapps/myapp/static",
             PathResolver.applyProjectNamePlaceholder("webapps/{PROJECT_NAME}/static", "myapp"))
     }
+
+    @Test
+    fun `resolveModuleRecipeDir uses deployment moduleDir deployType`() {
+        val dir = PathResolver.resolveModuleRecipeDir("/ws/zide", "zharehub_cloud", "M19")
+        assertTrue(dir.replace('\\', '/').endsWith("zide/deployment/zharehub_cloud/M19"))
+    }
+
+    @Test
+    fun `resolveTomcatHome defaults to AdventNet Sas tomcat`() {
+        val home = PathResolver.resolveTomcatHome("/ws/deployment/zharehub")
+        assertTrue(home.replace('\\', '/').endsWith("deployment/zharehub/AdventNet/Sas/tomcat"))
+    }
+
+    @Test
+    fun `resolveTomcatHome uses deploy folder basepath`() {
+        val home = PathResolver.resolveTomcatHome("/ws/deployment/app", "AdventNet/Sas/tomcat")
+        assertTrue(home.replace('\\', '/').endsWith("deployment/app/AdventNet/Sas/tomcat"))
+    }
 }

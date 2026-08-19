@@ -53,6 +53,14 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.1.0</b>
+        <ul>
+            <li>Clone shared ZIDE config repo into {workspace}/zide; install.xml recipes from zide/deployment/{moduleDir}/{deployType}/ with Tomcat-home replace root</li>
+            <li>Clear App Logs — ZIDE menu + App Logs toolbar; Option+Shift+K (Alt+Shift+K); blocked while the server is running</li>
+            <li>Clone cancel no longer shows user:pass@url in progress or error dialogs</li>
+            <li>Read-only Deployment Properties — window X/Escape close; single Close button</li>
+            <li>Cancel during New Project rolls back product + deployment dirs and closes the wizard window</li>
+        </ul>
         <b>0.0.9</b>
         <ul>
             <li>Debug attach reliability — wait for JPDA port via lsof (up to 60s) instead of a fixed 3s delay; fixes "Unable to open debugger port … Connection refused"</li>
@@ -399,6 +407,14 @@
                     description="Show application logs"
                     icon="AllIcons.Debugger.Console">
                 <keyboard-shortcut keymap="$default" first-keystroke="control shift L"/>
+            </action>
+
+            <action id="dzide.ClearAppLogs"
+                    class="com.zoho.dzide.actions.ClearAppLogsAction"
+                    text="Clear App Logs"
+                    description="Delete application log files and clear the App Logs console"
+                    icon="AllIcons.Actions.GC">
+                <keyboard-shortcut keymap="$default" first-keystroke="alt shift K"/>
             </action>
 
             <separator/>

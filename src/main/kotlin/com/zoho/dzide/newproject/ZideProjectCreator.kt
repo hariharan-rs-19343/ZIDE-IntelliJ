@@ -23,6 +23,7 @@ import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.DeploymentPropertiesDialog
 import com.zoho.dzide.zide.ZideConfigParser
+import com.zoho.dzide.zide.ZideConfigRepoService
 import java.io.File
 import java.net.InetAddress
 import java.nio.file.Files
@@ -46,6 +47,24 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         try {
             val startTime = System.currentTimeMillis()
             log.info("Service creation for ${result.serviceName} (${result.name}) started")
+
+            indicator.text = "Cloning ZIDE config repository..."
+            indicator.fraction = 0.02
+            val zideResult = ZideConfigRepoService.ensureCloned(workspaceDir, indicator)
+            if (!zideResult.success || zideResult.zideDir == null) {
+                throw RuntimeException(
+                    "Failed to clone/update the ZIDE config repository.\n" +
+                        "${zideResult.message}\n" +
+                        "Please make sure Mercurial (hg) is on PATH and the Internet connection is working."
+                )
+            }
+            val moduleDir = ZideConfigRepoService.resolveModuleDir(
+                zideDir = zideResult.zideDir,
+                productName = result.serviceName.ifBlank { result.name },
+                serviceKey = result.serviceName.ifBlank { result.name }
+            )
+            log.info("ZIDE config repo ready at ${zideResult.zideDir.absolutePath}; moduleDir=$moduleDir")
+            indicator.checkCanceled()
 
             // Step 1: Clone repository
             if (result.repositoryUrl.isNotBlank()) {
@@ -156,7 +175,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             // Step 6: Create service.xml (ZIDE metadata)
             indicator.text = "Writing service configuration..."
             indicator.fraction = 0.58
-            writeServiceXml(projectDir, deploymentDir, result)
+            writeServiceXml(projectDir, deploymentDir, result, moduleDir)
 
             // Step 7: Default zide_properties stub (Eclipse parent props finalized after hooks)
             indicator.text = "Writing deployment properties..."
@@ -171,7 +190,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             // Step 9: Create zide_build/ and zide_hook/ structures
             indicator.text = "Creating build and hook structures..."
             indicator.fraction = 0.64
-            createZideBuildStructure(projectDir, deploymentDir, result)
+            createZideBuildStructure(projectDir, deploymentDir, result, moduleDir)
 
             // Step 10a: Pre-creation hooks only (Eclipse Service.create order)
             if (hasBuild) {
@@ -246,6 +265,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
         } catch (ex: ProcessCanceledException) {
             log.info("ZIDE project creation cancelled: ${result.name}")
+            rollbackOnCancel(projectDir, deploymentDir, existingProject)
             throw ex
         } catch (ex: Exception) {
             log.error("Failed to create ZIDE project: ${result.name}", ex)
@@ -254,7 +274,10 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 rollback(projectDir, deploymentDir)
             }
             ApplicationManager.getApplication().invokeLater {
-                Messages.showErrorDialog("Failed to create project: ${ex.message}", "New ZIDE Project")
+                Messages.showErrorDialog(
+                    "Failed to create project: ${ZideConfigRepoService.redactUrlUserInfo(ex.message)}",
+                    "New ZIDE Project"
+                )
             }
         }
     }
@@ -389,11 +412,20 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             onStdout = { chunk -> updateIndicatorProgressLine(indicator, chunk) },
             onStderr = { chunk -> updateIndicatorProgressLine(indicator, chunk) }
         )
+        if (indicator.isCanceled) {
+            if (cloneDest != projectDir && cloneDest.exists()) {
+                cloneDest.deleteRecursively()
+            }
+            throw ProcessCanceledException()
+        }
         if (cloneResult.exitCode != 0) {
             if (cloneDest != projectDir && cloneDest.exists()) {
                 cloneDest.deleteRecursively()
             }
-            throw RuntimeException("Git clone failed (exit code ${cloneResult.exitCode}): ${cloneResult.stderr.takeLast(500)}")
+            throw RuntimeException(
+                "Git clone failed (exit code ${cloneResult.exitCode}): " +
+                    ZideConfigRepoService.redactUrlUserInfo(cloneResult.stderr.takeLast(500))
+            )
         }
 
         if (cloneDest != projectDir) {
@@ -461,6 +493,10 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             onStdout = { chunk -> updateIndicatorProgressLine(indicator, chunk) },
             onStderr = { chunk -> updateIndicatorProgressLine(indicator, chunk) }
         )
+        if (indicator.isCanceled) {
+            Files.deleteIfExists(tempFile)
+            throw ProcessCanceledException()
+        }
         if (wgetResult.exitCode != 0) {
             Files.deleteIfExists(tempFile)
             throw RuntimeException("Build download failed (exit code ${wgetResult.exitCode})")
@@ -476,7 +512,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             .lastOrNull { it.isNotEmpty() }
             ?: return
         // Keep modal dialog readable — git progress often uses \r updates.
-        indicator.text2 = line.replace('\r', ' ').take(180)
+        indicator.text2 = ZideConfigRepoService.redactUrlUserInfo(line.replace('\r', ' ').take(180))
     }
 
     private fun resolveGitExecutable(): String? {
@@ -538,14 +574,18 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         gitignoreFile.writeText(sb.toString())
     }
 
-    private fun writeServiceXml(projectDir: File, deploymentDir: File, result: ZideProjectWizardDialog.WizardResult) {
+    private fun writeServiceXml(
+        projectDir: File,
+        deploymentDir: File,
+        result: ZideProjectWizardDialog.WizardResult,
+        moduleDir: String
+    ) {
         val zideResources = File(projectDir, ".zide_resources")
         zideResources.mkdirs()
         val serviceXml = File(zideResources, "service.xml")
 
         val serviceKey = result.serviceName.ifBlank { result.name }
         val deployFolder = deploymentDir.absolutePath
-        val moduleDir = result.serviceName.ifBlank { result.name }
         val buildUrl = when (result.buildType) {
             "remote" -> result.buildUrl
             "local" -> result.localBuildPath
@@ -656,7 +696,12 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         repoProps.writeText("repositorypath=${projectDir.absolutePath}\n")
     }
 
-    private fun createZideBuildStructure(projectDir: File, deploymentDir: File, result: ZideProjectWizardDialog.WizardResult) {
+    private fun createZideBuildStructure(
+        projectDir: File,
+        deploymentDir: File,
+        result: ZideProjectWizardDialog.WizardResult,
+        moduleDir: String
+    ) {
         val zideResources = File(projectDir, ".zide_resources")
         val zideBuildDir = File(zideResources, "zide_build")
         val zideHookDir = File(zideResources, "zide_hook")
@@ -674,7 +719,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             log.info("Copying shared build files from: ${hgUtilsSource.absolutePath}")
             copySharedBuildFilesToDir(hgUtilsSource, zideBuildDir)
             copySharedBuildFilesToDir(hgUtilsSource, zideHookDir)
-            copyServiceAntProperties(workspace, result, zideBuildDir)
+            copyServiceAntProperties(workspace, moduleDir, zideBuildDir)
             copyCommonAntProperties(workspace, zideHookDir)
         } else {
             log.info("No shared build files found, generating stubs")
@@ -810,17 +855,19 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         File(targetDir, "buildlogs").mkdirs()
     }
 
-    private fun copyServiceAntProperties(workspace: File, result: ZideProjectWizardDialog.WizardResult, targetDir: File) {
+    private fun copyServiceAntProperties(workspace: File, moduleDir: String, targetDir: File) {
         if (File(targetDir, "ant.properties").exists()) return
 
-        val moduleDir = result.serviceName.ifBlank { result.name }
         val deployType = "M19"
-
-        val candidates = listOf(
-            File(workspace, "zide/deployment/$moduleDir/$deployType/zide_ant.properties"),
-            File(workspace, "zide/deployment/${moduleDir}_cloud/$deployType/zide_ant.properties"),
-            File(workspace, "zide/deployment/$moduleDir/zide_ant.properties")
-        )
+        val zideRepo = PathResolver.resolveZideConfigRepoFromWorkspace(workspace.absolutePath)
+        val candidates = mutableListOf<File>()
+        if (zideRepo != null) {
+            candidates.add(File(PathResolver.resolveModuleRecipeDir(zideRepo, moduleDir, deployType), "zide_ant.properties"))
+            if (!moduleDir.endsWith("_cloud")) {
+                candidates.add(File(PathResolver.resolveModuleRecipeDir(zideRepo, "${moduleDir}_cloud", deployType), "zide_ant.properties"))
+            }
+            candidates.add(File(zideRepo, "deployment/$moduleDir/zide_ant.properties"))
+        }
 
         for (candidate in candidates) {
             if (candidate.exists()) {
@@ -1261,6 +1308,19 @@ $roots
             }
         }
         return null
+    }
+
+    private fun rollbackOnCancel(projectDir: File, deploymentDir: File, existingProject: Project?) {
+        if (existingProject != null && !existingProject.isDisposed) {
+            ApplicationManager.getApplication().invokeAndWait {
+                try {
+                    ProjectManager.getInstance().closeAndDispose(existingProject)
+                } catch (e: Exception) {
+                    log.warn("Failed to close NPW project after cancel", e)
+                }
+            }
+        }
+        rollback(projectDir, deploymentDir)
     }
 
     private fun rollback(projectDir: File, deploymentDir: File) {

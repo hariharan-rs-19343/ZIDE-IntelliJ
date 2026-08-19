@@ -4,6 +4,7 @@ import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
 import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.tomcat.TomcatServerProvider
@@ -21,13 +22,43 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
 
     companion object {
         private const val MAX_TAIL_LINES = 5000
+        const val APPLICATION_LOG_SUFFIX = "application0.txt"
+
+        fun resolveLogsDir(project: Project): Path? {
+            val serverProvider = TomcatServerProvider.getInstance(project)
+            val servers = serverProvider.getServers()
+            if (servers.isNotEmpty()) {
+                val logsDir = Path.of(servers.first().path).parent.resolve("logs")
+                if (logsDir.exists()) return logsDir
+            }
+
+            val projectPath = project.basePath ?: return null
+            val zideConfig = ZideConfigParser.readZideConfig(projectPath)
+            val deploymentFolder = zideConfig?.service?.properties?.get("ZIDE.DEPLOYMENT_FOLDER")
+            if (deploymentFolder != null) {
+                val logsDir = Path.of(deploymentFolder, "AdventNet", "Sas", "logs")
+                if (logsDir.exists()) return logsDir
+            }
+            return null
+        }
+
+        fun listApplicationLogFiles(logsDir: Path): List<Path> {
+            if (!logsDir.exists()) return emptyList()
+            return Files.list(logsDir).use { stream ->
+                stream.filter { it.isRegularFile() && it.name.endsWith(APPLICATION_LOG_SUFFIX) }
+                    .sorted(Comparator.comparingLong<Path> { Files.getLastModifiedTime(it).toMillis() }.reversed())
+                    .toList()
+            }
+        }
+
+        fun findLatestApplicationLog(logsDir: Path): Path? = listApplicationLogFiles(logsDir).firstOrNull()
     }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val tomcatManager = TomcatManager.getInstance(project)
 
-        val logsDir = resolveLogsDir(e)
+        val logsDir = resolveLogsDir(project)
         if (logsDir == null || !logsDir.exists()) {
             NotificationUtil.warn(project, "Application log file not available.")
             return
@@ -42,12 +73,7 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
                 toolWindow.contentManager.setSelectedContent(appLogsContent)
             }
 
-            val logFile = Files.list(logsDir).use { stream ->
-                stream.filter { it.isRegularFile() && it.name.endsWith("application0.txt") }
-                    .sorted(Comparator.comparingLong<Path> { Files.getLastModifiedTime(it).toMillis() }.reversed())
-                    .findFirst()
-                    .orElse(null)
-            }
+            val logFile = findLatestApplicationLog(logsDir)
 
             if (logFile == null) {
                 console.clear()
@@ -77,28 +103,6 @@ class AppLogsAction : AnAction("App Logs", "Show application logs from server lo
                 }
             }
         }
-    }
-
-    private fun resolveLogsDir(e: AnActionEvent): Path? {
-        val project = e.project ?: return null
-
-        val serverProvider = TomcatServerProvider.getInstance(project)
-        val servers = serverProvider.getServers()
-        if (servers.isNotEmpty()) {
-            val server = servers.first()
-            val logsDir = Path.of(server.path).parent.resolve("logs")
-            if (logsDir.exists()) return logsDir
-        }
-
-        val projectPath = project.basePath ?: return null
-        val zideConfig = ZideConfigParser.readZideConfig(projectPath)
-        val deploymentFolder = zideConfig?.service?.properties?.get("ZIDE.DEPLOYMENT_FOLDER")
-        if (deploymentFolder != null) {
-            val logsDir = Path.of(deploymentFolder, "AdventNet", "Sas", "logs")
-            if (logsDir.exists()) return logsDir
-        }
-
-        return null
     }
 
     private fun readTailLines(file: Path, maxLines: Int): List<String> {

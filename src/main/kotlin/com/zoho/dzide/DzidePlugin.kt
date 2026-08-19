@@ -10,6 +10,7 @@ import com.zoho.dzide.update.PluginUpdateChecker
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.ProxyConfig
 import com.zoho.dzide.zide.ZideConfigParser
+import com.zoho.dzide.zide.ZideConfigRepoService
 import java.io.File
 
 class DzidePlugin : ProjectActivity {
@@ -32,6 +33,7 @@ class DzidePlugin : ProjectActivity {
         autoConfigureLibraries(project)
 
         ApplicationManager.getApplication().executeOnPooledThread {
+            updateZideConfigRepo(project)
             val updateInfo = PluginUpdateChecker.checkForUpdate()
             if (updateInfo != null) {
                 ApplicationManager.getApplication().invokeLater {
@@ -40,6 +42,18 @@ class DzidePlugin : ProjectActivity {
                     }
                 }
             }
+        }
+    }
+
+    private fun updateZideConfigRepo(project: Project) {
+        val projectPath = project.basePath ?: return
+        if (!ZideConfigParser.detectZideConfigInProject(projectPath)) return
+        val workspace = File(projectPath).parentFile ?: return
+        val result = ZideConfigRepoService.ensureCloned(workspace)
+        if (!result.success) {
+            log.warn("ZIDE config repo update skipped: ${result.message}")
+        } else {
+            log.info("ZIDE config repo ready: ${result.message}")
         }
     }
 

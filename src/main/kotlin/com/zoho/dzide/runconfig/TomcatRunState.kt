@@ -39,6 +39,8 @@ class TomcatRunState(
             tomcatManager.deployWarFile(server, warFilePath, contextPath)
         }
 
+        tomcatManager.patchDeploymentConfigs(server)
+
         val script = ShellUtil.catalinaScript(server.path)
         val catalinaCommand = if (launchMode == LaunchMode.DEBUG) "jpda start" else "start"
 

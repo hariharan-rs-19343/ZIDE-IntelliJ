@@ -64,9 +64,15 @@ class DeploymentPropertiesDialog(
     init {
         title = if (readOnly) "$serviceKey (Read Only)" else serviceKey
         setOKButtonText(if (readOnly) "Close" else "Save")
-        if (readOnly) setCancelButtonText("Close")
         init()
-        if (readOnly) cancelAction.isEnabled = false
+    }
+
+    override fun createActions(): Array<Action> {
+        return if (readOnly) arrayOf(okAction) else super.createActions()
+    }
+
+    override fun doCancelAction() {
+        close(CANCEL_EXIT_CODE)
     }
 
     override fun createCenterPanel(): JComponent {

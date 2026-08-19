@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Project Identity
 - Plugin ID: `com.zoho.dzide`
-- Current Version: 0.0.9
+- Current Version: 0.1.0
 - Language: Kotlin 2.2.0, JVM 21
 - Build: Gradle 9.0 (Kotlin DSL), IntelliJ Platform Plugin 2.16.0
 - Target IDE: IntelliJ IDEA 2024.3+ (Community or Ultimate)
@@ -17,7 +17,7 @@ alwaysApply: true
 
 ## Package Structure (`src/main/kotlin/com/zoho/dzide/`)
 - `DzidePlugin.kt` — ProjectActivity startup (logs init, checks ~/.wgetrc, auto-update check)
-- `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh, RunHooks, CustomBuild, Uninstall)
+- `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, ClearAppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh, RunHooks, CustomBuild, Uninstall)
 - `tomcat/` — TomcatManager (lifecycle, compiler output config, build-before-start, project libraries), TomcatServerProvider (CRUD)
 - `deploysync/` — DeploySyncFileCreationListener (BulkFileListener for create/move/save/delete), ResourceSyncManager (ANT hooks, hot-swap trigger, auto-resource copy, file delete sync), AntResolver
 - `zide/` — ZideConfigParser, DeploymentConfigPatcher (server.xml, web.xml, persistence, security, HTTP port — no keystore/HTTPS connector), ZideSetupWizard, DeploymentPropertiesDialog
@@ -107,10 +107,11 @@ alwaysApply: true
 - Build: Ctrl+Shift+B
 - Update Deployment: Ctrl+Shift+U
 - App Logs: Ctrl+Shift+L
+- Clear App Logs: Option+Shift+K (Alt+Shift+K)
 
 ## Tool Window: SAS-ZIDE (bottom)
 - Tabs: Servers (tree), Output (console), App Logs (console)
-- Toolbar: Add, Refresh, Stop, Restart (Servers tab); Refresh (App Logs tab)
+- Toolbar: Add, Refresh, Stop, Restart (Servers tab); Refresh, Clear App Logs (App Logs tab)
 
 ## Important Implementation Details
 - TomcatManager implements Disposable (kills servers on IDE quit)

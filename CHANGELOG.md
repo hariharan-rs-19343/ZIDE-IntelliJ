@@ -4,6 +4,23 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 
 ---
 
+## [0.1.0] — 2026-08-19
+
+### Added
+- **ZIDE config repo clone** — clones `https://cmsuite.csez.zohocorpin.com/eclipse/zide` into `{workspace}/zide` (Eclipse `cloneZideProject` parity). Create aborts if clone fails. `install.xml` recipes are read from `zide/deployment/{moduleDir}/{deployType}/`.
+- **Clear App Logs** — ZIDE menu and App Logs toolbar. Shortcut **Option+Shift+K** (Alt+Shift+K). Deletes `*application0.txt` and clears the App Logs console. Blocked with an error dialog while the server is running.
+
+### Fixed
+- **Clone cancel leaked credentials** — canceling `hg clone` is treated as cancel (not failure). Progress and error text redact `user:pass@` from URLs.
+- **Read-only Deployment Properties** — window X and Escape dismiss the dialog; a single Close button (no disabled Close/Done pair).
+- **Cancel during New Project** — product dir and `deployment/{name}` are rolled back; New Project Wizard window is closed. Shared `{workspace}/zide` is kept. No “Failed to create project” on cancel.
+- **Clear App Logs icon** — uses `AllIcons.Actions.GC` (the previous `ClearConsole` icon does not exist and crashed the ZIDE menu).
+
+### Changed
+- **install.xml replace root** — replacements apply against Tomcat home (`AdventNet/Sas/tomcat`), not the raw deployment folder. Catalog `@moduledir` comes from `{workspace}/zide/.zide_resources/zide_config.xml`.
+
+---
+
 ## [0.0.9] — 2026-08-10
 
 ### Fixed

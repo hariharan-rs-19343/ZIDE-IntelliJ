@@ -1,11 +1,10 @@
 package com.zoho.dzide.config.replacer
 
 import com.intellij.openapi.diagnostic.Logger
+import com.zoho.dzide.parser.ModuleZidePropsParser
+import com.zoho.dzide.parser.PathResolver
 import java.io.File
 import java.nio.file.Path
-import kotlin.io.path.exists
-import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 /**
  * Applies product install.xml / install.properties replacements at launch
@@ -28,12 +27,15 @@ object ConfigReplacerRunner {
         zideProps: Map<String, String>,
         branch: String
     ): Result {
+        val projectName = serviceProps["ZIDE.PARENT_SERVICE"]?.takeIf { it.isNotBlank() }
+            ?: serviceProps["ZIDE.SERVICE_KEY"].orEmpty()
+        val replaceRoot = resolveReplaceRoot(projectPath, serviceProps, deploymentFolder)
         val props = LinkedHashMap<String, String>().apply {
             putAll(serviceProps)
             putAll(zideProps)
             putIfAbsent("ZIDE.DEPLOYMENT_FOLDER", deploymentFolder)
             putIfAbsent("ZIDE.REPOSITORY_PATH", projectPath)
-            putIfAbsent("PROJECT_NAME", serviceProps["ZIDE.SERVICE_KEY"] ?: "")
+            put("PROJECT_NAME", projectName)
         }
 
         val installXml = resolveInstallXml(projectPath, serviceProps)
@@ -44,12 +46,14 @@ object ConfigReplacerRunner {
                 val fileRules = parser.parse(activeBranch)
                 var touched = 0
                 val messages = mutableListOf<String>()
+                messages.add("install.xml: ${installXml.absolutePath}")
+                messages.add("replace root: $replaceRoot")
                 for ((key, changes) in fileRules) {
                     val colon = key.lastIndexOf(':')
                     if (colon < 0) continue
                     val relPath = key.substring(0, colon)
                     val type = key.substring(colon + 1).lowercase()
-                    val target = File(deploymentFolder, relPath.removePrefix("/").removePrefix(File.separator))
+                    val target = File(replaceRoot, relPath.removePrefix("/").removePrefix(File.separator))
                     if (!target.exists()) {
                         messages.add("Skip missing file: ${target.absolutePath}")
                         continue
@@ -79,7 +83,7 @@ object ConfigReplacerRunner {
         val installProps = resolveInstallProperties(projectPath, serviceProps)
         if (installProps != null && installProps.exists()) {
             return try {
-                val touched = InstallPropertiesReplacer.apply(installProps, deploymentFolder, props)
+                val touched = InstallPropertiesReplacer.apply(installProps, replaceRoot, props)
                 Result(applied = touched > 0, filesTouched = touched, messages = listOf("install.properties applied ($touched files)"))
             } catch (e: Exception) {
                 log.warn("install.properties replace failed: ${e.message}", e)
@@ -90,27 +94,44 @@ object ConfigReplacerRunner {
         return Result(applied = false)
     }
 
-    private fun resolveInstallXml(projectPath: String, serviceProps: Map<String, String>): File? {
-        val moduleDir = serviceProps["ZIDE.REPOSITORY_MODULE_DIR"] ?: return findFirst(projectPath, "install.xml")
-        val deployType = serviceProps["ZIDE.DEPLOY_TYPE"] ?: "M19"
-        val candidates = listOf(
-            Path.of(projectPath, "zide", "deployment", moduleDir, deployType, "install.xml"),
-            Path.of(projectPath, ".zide_resources", "install.xml"),
-            Path.of(System.getProperty("user.home"), "zide", "deployment", moduleDir, deployType, "install.xml")
-        )
-        return candidates.map { it.toFile() }.firstOrNull { it.exists() } ?: findFirst(projectPath, "install.xml")
-    }
-
-    private fun resolveInstallProperties(projectPath: String, serviceProps: Map<String, String>): File? {
+    internal fun resolveReplaceRoot(
+        projectPath: String,
+        serviceProps: Map<String, String>,
+        deploymentFolder: String
+    ): String {
         val moduleDir = serviceProps["ZIDE.REPOSITORY_MODULE_DIR"]
         val deployType = serviceProps["ZIDE.DEPLOY_TYPE"] ?: "M19"
-        val candidates = mutableListOf<Path>()
-        if (moduleDir != null) {
-            candidates.add(Path.of(projectPath, "zide", "deployment", moduleDir, deployType, "install.properties"))
-            candidates.add(Path.of(System.getProperty("user.home"), "zide", "deployment", moduleDir, deployType, "install.properties"))
+        val zideRepo = PathResolver.resolveZideConfigRepoFromProject(projectPath)
+        var serverHome: String? = null
+        if (zideRepo != null && !moduleDir.isNullOrBlank()) {
+            val propsPath = ModuleZidePropsParser.resolveModuleZidePropsPath(zideRepo, moduleDir, deployType)
+            serverHome = ModuleZidePropsParser.readDeployFolderBasepath(propsPath)
         }
-        candidates.add(Path.of(projectPath, ".zide_resources", "install.properties"))
-        return candidates.map { it.toFile() }.firstOrNull { it.exists() }
+        return PathResolver.resolveTomcatHome(deploymentFolder, serverHome)
+    }
+
+    internal fun resolveInstallXml(projectPath: String, serviceProps: Map<String, String>): File? {
+        val moduleDir = serviceProps["ZIDE.REPOSITORY_MODULE_DIR"]
+        val deployType = serviceProps["ZIDE.DEPLOY_TYPE"] ?: "M19"
+        val zideRepo = PathResolver.resolveZideConfigRepoFromProject(projectPath)
+        val candidates = mutableListOf<File>()
+        if (zideRepo != null && !moduleDir.isNullOrBlank()) {
+            candidates.add(File(PathResolver.resolveModuleRecipeDir(zideRepo, moduleDir, deployType), "install.xml"))
+        }
+        candidates.add(Path.of(projectPath, ".zide_resources", "install.xml").toFile())
+        return candidates.firstOrNull { it.exists() } ?: findFirst(projectPath, "install.xml")
+    }
+
+    internal fun resolveInstallProperties(projectPath: String, serviceProps: Map<String, String>): File? {
+        val moduleDir = serviceProps["ZIDE.REPOSITORY_MODULE_DIR"]
+        val deployType = serviceProps["ZIDE.DEPLOY_TYPE"] ?: "M19"
+        val zideRepo = PathResolver.resolveZideConfigRepoFromProject(projectPath)
+        val candidates = mutableListOf<File>()
+        if (zideRepo != null && !moduleDir.isNullOrBlank()) {
+            candidates.add(File(PathResolver.resolveModuleRecipeDir(zideRepo, moduleDir, deployType), "install.properties"))
+        }
+        candidates.add(Path.of(projectPath, ".zide_resources", "install.properties").toFile())
+        return candidates.firstOrNull { it.exists() }
     }
 
     private fun findFirst(projectPath: String, name: String): File? {

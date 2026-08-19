@@ -66,6 +66,22 @@ object ModuleZidePropsParser {
         }
     }
 
+    fun readAllPropertiesFromFile(zidePropertiesPath: String?): Map<String, String> {
+        if (zidePropertiesPath == null) return emptyMap()
+        val file = Path.of(zidePropertiesPath)
+        if (!file.exists()) return emptyMap()
+        return try {
+            parseJavaProperties(file.inputStream().bufferedReader().readText())
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun readDeployFolderBasepath(zidePropertiesPath: String?): String? {
+        val value = readAllPropertiesFromFile(zidePropertiesPath)["deploy.folder.basepath"]?.trim()
+        return value?.ifEmpty { null }
+    }
+
     fun readLaunchVmArgumentsFromProperties(zidePropertiesPath: String?): String? =
         readModuleZidePropsDataFromFile(zidePropertiesPath).launchVmArguments
 
