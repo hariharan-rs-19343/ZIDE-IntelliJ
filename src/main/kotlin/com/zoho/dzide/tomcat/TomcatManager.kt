@@ -120,23 +120,33 @@ class TomcatManager(private val project: Project) : Disposable {
     }
 
     @Suppress("UNUSED_PARAMETER")
-    fun patchDeploymentConfigs(server: TomcatServer, force: Boolean = false) {
-        val projectPath = project.basePath ?: return
+    fun patchDeploymentConfigs(server: TomcatServer, force: Boolean = false): Boolean {
+        val projectPath = project.basePath ?: return false
         ZideConfigParser.clearCache(projectPath)
-        val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return
-        val serviceProps = zideConfig.service?.properties ?: return
+        val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return false
+        val serviceProps = zideConfig.service?.properties ?: return false
         val zideProps = zideConfig.properties?.properties ?: emptyMap()
 
+        val dbName = zideProps["ZIDE_DB_NAME"]?.trim()?.ifEmpty { null }
+            ?: zideProps["ZIDE.DB_NAME"]?.trim()?.ifEmpty { null }
+        if (dbName == null) {
+            val message = "Database name is missing in .zide_resources/zide_properties.xml (ZIDE_DB_NAME). Server will not start."
+            logError(message)
+            NotificationUtil.error(project, message)
+            return false
+        }
+
         val forceEveryStart = force || com.zoho.dzide.settings.ZideSettingsState.getInstance().replacerEveryStart
-        if (!DeploymentConfigPatcher.shouldReplace(serviceProps, forceEveryStart)) {
+        val willPatch = DeploymentConfigPatcher.shouldReplace(serviceProps, forceEveryStart)
+        if (!willPatch) {
             log("Skipping config patching: ZIDE.DO_REPLACE=true (already applied).")
-            return
+            return true
         }
 
         val patchCtx = DeploymentConfigPatcher.buildPatchContext(serviceProps, zideProps)
         if (patchCtx == null) {
             log("Skipping config patching: missing DEPLOYMENT_FOLDER or PARENT_SERVICE.")
-            return
+            return true
         }
 
         // Prefer product install.xml / install.properties; fall back to hardcoded patcher.
@@ -156,7 +166,7 @@ class TomcatManager(private val project: Project) : Disposable {
             val result = DeploymentConfigPatcher.patchAll(patchCtx, project)
             if (result.skipped) {
                 log("  Skipping config patching: ZIDE.DO_REPLACE=true (already applied).")
-                return
+                return true
             }
             if (result.httpsPortUpdated) log("  Rewrote HTTPS Connector (SSLEnabled + sas.keystore); preserved HTTP connector")
             if (result.serverXmlPatched) log("  Patched server.xml (Context, shutdown port, HTTP port)")
@@ -177,6 +187,7 @@ class TomcatManager(private val project: Project) : Disposable {
         }
 
         ZideConfigParser.setServiceProperty(projectPath, "ZIDE.DO_REPLACE", "true")
+        return true
     }
 
     /**
@@ -482,7 +493,7 @@ class TomcatManager(private val project: Project) : Disposable {
             }
 
             runPreStartSetup(server)
-            patchDeploymentConfigs(server)
+            if (!patchDeploymentConfigs(server)) return@executeOnPooledThread
 
             log("======================================")
             log("Starting Tomcat server: ${server.name}")
@@ -562,7 +573,7 @@ class TomcatManager(private val project: Project) : Disposable {
             }
 
             runPreStartSetup(server)
-            patchDeploymentConfigs(server)
+            if (!patchDeploymentConfigs(server)) return@executeOnPooledThread
 
             log("======================================")
             log("Starting Tomcat server in debug mode: ${server.name}")

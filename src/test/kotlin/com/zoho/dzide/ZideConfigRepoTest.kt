@@ -204,6 +204,131 @@ class ConfigReplacerRunnerTest {
             assertTrue(result.applied)
             assertEquals("production=false\n", target.toFile().readText())
             assertEquals("production=true\n", wrong.resolve("configuration.properties").toFile().readText())
+            assertTrue(result.missingDatabaseName)
+        } finally {
+            workspace.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `text replace expands capture group and project name`() {
+        val workspace = Files.createTempDirectory("zide-ws")
+        try {
+            val project = workspace.resolve("zharehub")
+            project.createDirectories()
+            val recipe = workspace.resolve("zide/deployment/zharehub_cloud/M19")
+            recipe.createDirectories()
+            recipe.resolve("Zide.properties").writeText("deploy.folder.basepath=AdventNet/Sas/tomcat\n")
+            recipe.resolve("install.xml").writeText(
+                """
+                <?xml version="1.0"?>
+                <configurations>
+                  <configuration branch="default">
+                    <files>
+                      <file path="webapps/{PROJECT_NAME}/WEB-INF/conf/configuration.properties" type="text">
+                        <property regex="(app.home=).*">
+                          <value>\1webapps/{PROJECT_NAME}/WEB-INF</value>
+                        </property>
+                      </file>
+                    </files>
+                  </configuration>
+                </configurations>
+                """.trimIndent()
+            )
+
+            val deployment = workspace.resolve("deployment/zharehub")
+            val conf = deployment.resolve("AdventNet/Sas/tomcat/webapps/zharehub/WEB-INF/conf")
+            conf.createDirectories()
+            val target = conf.resolve("configuration.properties")
+            target.writeText("app.home=old\n")
+
+            val result = ConfigReplacerRunner.run(
+                projectPath = project.toString(),
+                deploymentFolder = deployment.toString(),
+                serviceProps = mapOf(
+                    "ZIDE.REPOSITORY_MODULE_DIR" to "zharehub_cloud",
+                    "ZIDE.DEPLOY_TYPE" to "M19",
+                    "ZIDE.PARENT_SERVICE" to "zharehub"
+                ),
+                zideProps = mapOf(
+                    "ZIDE_DB_TYPE" to "PGSQL",
+                    "ZIDE_DB_NAME" to "zharehub"
+                ),
+                branch = "default"
+            )
+            assertTrue(result.applied)
+            assertFalse(result.missingDatabaseName)
+            assertEquals("app.home=webapps/zharehub/WEB-INF\n", target.toFile().readText())
+        } finally {
+            workspace.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `db recipe writes ZIDE_DB_NAME over the previous db name`() {
+        val workspace = Files.createTempDirectory("zide-ws")
+        try {
+            val project = workspace.resolve("zharehub")
+            project.createDirectories()
+            val recipe = workspace.resolve("zide/deployment/zharehub_cloud/M19")
+            recipe.createDirectories()
+            recipe.resolve("Zide.properties").writeText("deploy.folder.basepath=AdventNet/Sas/tomcat\n")
+            recipe.resolve("install.xml").writeText(
+                """
+                <?xml version="1.0"?>
+                <configurations>
+                  <configuration branch="default">
+                    <files>
+                      <file path="webapps/{PROJECT_NAME}/WEB-INF/conf/configuration.properties" type="text">
+                        <property regex="production=.*">
+                          <value>production=false</value>
+                        </property>
+                      </file>
+                    </files>
+                  </configuration>
+                </configurations>
+                """.trimIndent()
+            )
+            recipe.resolve("pgsql_replace.xml").writeText(
+                """
+                <?xml version="1.0"?>
+                <configurations>
+                  <configuration branch="default">
+                    <files>
+                      <file path="webapps/{PROJECT_NAME}/WEB-INF/conf/configuration.properties" type="text">
+                        <property regex="(?m:^(db.name=).*)">
+                          <value>\1{ZIDE_DB_NAME}</value>
+                        </property>
+                      </file>
+                    </files>
+                  </configuration>
+                </configurations>
+                """.trimIndent()
+            )
+            workspace.resolve("zide/deployment/pgsql_replace.xml").writeText("<configurations/>")
+
+            val deployment = workspace.resolve("deployment/zharehub")
+            val conf = deployment.resolve("AdventNet/Sas/tomcat/webapps/zharehub/WEB-INF/conf")
+            conf.createDirectories()
+            val target = conf.resolve("configuration.properties")
+            target.writeText("production=true\ndb.name=sasdb\n")
+
+            val result = ConfigReplacerRunner.run(
+                projectPath = project.toString(),
+                deploymentFolder = deployment.toString(),
+                serviceProps = mapOf(
+                    "ZIDE.REPOSITORY_MODULE_DIR" to "zharehub_cloud",
+                    "ZIDE.DEPLOY_TYPE" to "M19",
+                    "ZIDE.PARENT_SERVICE" to "zharehub"
+                ),
+                zideProps = mapOf(
+                    "ZIDE_DB_TYPE" to "PGSQL",
+                    "ZIDE_DB_NAME" to "zharehub"
+                ),
+                branch = "default"
+            )
+            assertTrue(result.applied)
+            assertEquals("production=false\ndb.name=zharehub\n", target.toFile().readText())
         } finally {
             workspace.toFile().deleteRecursively()
         }

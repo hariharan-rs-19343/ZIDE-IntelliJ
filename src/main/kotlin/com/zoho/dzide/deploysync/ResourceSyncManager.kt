@@ -289,6 +289,7 @@ class ResourceSyncManager(private val project: Project) : Disposable {
         val m19ProjectName = refreshed.repositoryModuleDir ?: projectDirectoryName
 
         val fileExtension = Path.of(filePath).extension
+
         if (fileExtension == "java") {
             // Java is not auto-copied. IntelliJ compiles into WEB-INF/classes when
             // TomcatManager redirected compiler output. Do NOT call hot-swap here —

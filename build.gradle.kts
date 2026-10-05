@@ -8,6 +8,7 @@ group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
 repositories {
+    maven { url = uri("https://cache-redirector.jetbrains.com/maven-central") }
     mavenCentral()
     intellijPlatform {
         defaultRepositories()

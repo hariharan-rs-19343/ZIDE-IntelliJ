@@ -28,11 +28,7 @@ object TextReplacer {
                 content += newProp
             } else {
                 val regex = property["regex"] ?: continue
-                content = try {
-                    content.replace(Regex(regex), replace)
-                } catch (_: Exception) {
-                    content
-                }
+                content = EclipseReplacement.apply(content, regex, replace)
             }
         }
         file.toPath().writeText(content)

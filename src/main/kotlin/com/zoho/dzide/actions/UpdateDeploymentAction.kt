@@ -119,9 +119,9 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
             }
 
             val zideProps = zideConfig.properties?.properties ?: emptyMap()
-            val dbUser = zideProps["ZIDE.DB_USER"] ?: "root"
-            val dbName = zideProps["ZIDE.DB_NAME"] ?: parentService.lowercase()
-            val dbPass = zideProps["ZIDE.DB_PASS"] ?: ""
+            val dbUser = zideProps["ZIDE_DB_USER"] ?: zideProps["ZIDE.DB_USER"] ?: "root"
+            val dbName = zideProps["ZIDE_DB_NAME"] ?: zideProps["ZIDE.DB_NAME"] ?: parentService.lowercase()
+            val dbPass = zideProps["ZIDE_DB_PASS"] ?: zideProps["ZIDE.DB_PASS"] ?: ""
 
             ConsoleUtil.print(console, project, "=== Update Deployment ===\n", ConsoleViewContentType.SYSTEM_OUTPUT)
             ConsoleUtil.print(console, project, "Zip file: $zipPath\n", ConsoleViewContentType.SYSTEM_OUTPUT)
@@ -317,7 +317,13 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                                 zideProps = refreshed?.properties?.properties ?: zideProps,
                                 branch = refreshed?.service?.properties?.get("ZIDE.REPOSITORY_TRUNK") ?: "default"
                             )
-                            if (replacerResult.applied) {
+                            if (replacerResult.missingDatabaseName) {
+                                ConsoleUtil.print(
+                                    console, project,
+                                    "  Database name is missing in .zide_resources/zide_properties.xml (ZIDE_DB_NAME). Left configuration.properties db.name unchanged.\n",
+                                    ConsoleViewContentType.ERROR_OUTPUT
+                                )
+                            } else if (replacerResult.applied) {
                                 ConsoleUtil.print(console, project, "  Applied data-driven replacements (${replacerResult.filesTouched} file(s)).\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                             } else {
                                 val patchResult = DeploymentConfigPatcher.patchAll(patchCtx, project)
@@ -345,7 +351,9 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
                                     ConsoleUtil.print(console, project, "  Config files already up to date.\n", ConsoleViewContentType.SYSTEM_OUTPUT)
                                 }
                             }
-                            ZideConfigParser.setServiceProperty(repositoryPath, "ZIDE.DO_REPLACE", "true")
+                            if (!replacerResult.missingDatabaseName) {
+                                ZideConfigParser.setServiceProperty(repositoryPath, "ZIDE.DO_REPLACE", "true")
+                            }
                         } else {
                             ConsoleUtil.print(console, project, "  Skipped: missing DEPLOYMENT_FOLDER or PARENT_SERVICE.\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
                         }

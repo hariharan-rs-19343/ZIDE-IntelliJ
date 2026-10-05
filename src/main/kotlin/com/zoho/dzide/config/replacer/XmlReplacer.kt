@@ -33,7 +33,7 @@ object XmlReplacer {
                 val regex = property["regex"]
                 if (!regex.isNullOrBlank() && regex != xpathExpr) {
                     val current = node.textContent ?: ""
-                    node.textContent = current.replace(Regex(regex), replace)
+                    node.textContent = EclipseReplacement.apply(current, regex, replace)
                 } else {
                     node.textContent = replace
                 }
