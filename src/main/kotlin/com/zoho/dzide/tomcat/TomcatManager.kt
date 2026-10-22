@@ -20,6 +20,8 @@ import com.zoho.dzide.parser.PathResolver
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.PortUtil
 import com.zoho.dzide.util.ShellUtil
+import com.zoho.dzide.util.ZeroProxy
+import com.zoho.dzide.util.ZeroProxyManager
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.ZideConfigParser
 import com.intellij.openapi.diagnostic.Logger
@@ -101,7 +103,12 @@ class TomcatManager(private val project: Project) : Disposable {
         val zideArgs = (latestFromProperties ?: server.zideLaunchVmArguments ?: "").trim()
         val manualArgs = (server.manualLaunchArgs ?: "").trim()
         val merged = listOf(zideArgs, manualArgs).filter { it.isNotEmpty() }.joinToString(" ").trim()
-        return merged.ifEmpty { null }
+        val proxyArgs = ZeroProxyManager.launchProxyArgs(server)
+        val withProxy = ZeroProxy.mergeLaunchArgs(merged, proxyArgs)
+        if (proxyArgs != null && withProxy != merged.ifEmpty { null }) {
+            log("Zero Agent is on. Adding ZeroTrust proxy VM arguments: $proxyArgs")
+        }
+        return withProxy
     }
 
     private fun buildCatalinaEnvVars(server: TomcatServer, debugPort: Int? = null): Map<String, String> {

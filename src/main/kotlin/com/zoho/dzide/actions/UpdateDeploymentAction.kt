@@ -17,6 +17,7 @@ import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.PortUtil
 import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.util.ShellUtil
+import com.zoho.dzide.util.ZeroProxyManager
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.ZideConfigParser
 import java.nio.file.Files
@@ -419,6 +420,7 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
             val result = ProcessUtil.executeCapturing(
                 command = command,
                 workingDir = repositoryPath,
+                env = ZeroProxyManager.processEnv(),
                 timeoutMs = 300_000
             )
 

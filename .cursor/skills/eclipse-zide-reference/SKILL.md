@@ -6,8 +6,8 @@ description: >-
   commit integration, deployment management, hooks, config parsing, or any feature that
   mirrors the Eclipse ZIDE plugin (com.zoho.zide v2.4.7). Triggers on work in
   src/main/kotlin/com/zoho/dzide/ or when the user mentions Eclipse ZIDE, service creation,
-  zide_config.xml, service.xml, zide_properties.xml, deployment patching, code checks, or
-  commit checks.
+  zide_config.xml, service.xml, zide_properties.xml, deployment patching, code checks,
+  commit checks, ZeroTrust, Zero Agent, ZERO_HELPER_STATUS, proxy, 3128, or launch.proxy.vmargs.
 ---
 
 # Eclipse ZIDE Plugin Reference for IntelliJ Development
@@ -17,6 +17,7 @@ This skill contains the complete architecture and behavior of the Eclipse ZIDE p
 (`com.zoho.dzide`) without needing the Eclipse decompiled source.
 
 For detailed field references and XML schemas, see [reference.md](reference.md).
+For ZeroTrust / Zero Agent proxy behavior, see [zero-proxy.md](zero-proxy.md).
 
 ## Plugin Identity
 
@@ -176,4 +177,13 @@ Properties passed: `REPOSITORY_PATH`, `DEPLOYMENT_PATH`, `ZIDE.PARENT_SERVICE`
 - Runnable services are sorted with ZOHOACCOUNTS first
 - Credential stripping: HgrcCredentialUtil removes passwords from `.hgrc` and git origin
 - Download supports resume: if interrupted, user prompted to continue
-- Proxy bypass hosts: `cm-server.csez.zohocorpin.com, cmsuite.csez.zohocorpin.com, cmtools.csez.zohocorpin.com, build.zohocorp.com, git.csez.zohocorpin.com, zide, zide.csez.zohocorpin.com`
+- Proxy bypass hosts: `cm-server.csez.zohocorpin.com, cmsuite.csez.zohocorpin.com, cmtools.csez.zohocorpin.com, build.zohocorp.com, build-new.zohocorp.com, git.csez.zohocorpin.com, zide, zide.csez.zohocorpin.com`
+
+## ZeroTrust Proxy
+
+Source: [Zero proxy configuration](https://learn.zoho.in/portal/zohocorp/manual/zide-faqs/article/zero-proxy-configuration) (Zoho Learn, sign-in required). Details in [zero-proxy.md](zero-proxy.md).
+
+- Zero Agent is on when `ZERO_HELPER_STATUS=ON` is in `~/.zshrc` / `~/.bash_profile` / `~/.bashrc`, or the Windows environment variable is `ON`. Proxy is `127.0.0.1:3128`.
+- Eclipse startup (preference "Revert Manual Network Proxies", default on) switches the IDE to Direct and unsets `http_proxy` / `https_proxy` unless `-Dzide.unalterproxy=true`.
+- Eclipse Tomcat launch appends `launch.proxy.vmargs` from module `Zide.properties`, else `deployment/zide/Zide.properties`, only while Zero Agent is on.
+- IntelliJ intentionally differs: the IDE HTTP proxy, git/wget/Ant child environment, and Tomcat all use the Zero Agent while it is on. Never edit the user's shell rc files.

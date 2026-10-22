@@ -20,6 +20,7 @@ import com.zoho.dzide.parser.SourceFolderDetector
 import com.zoho.dzide.settings.ZideSettingsState
 import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.util.ProcessUtil
+import com.zoho.dzide.util.ZeroProxyManager
 import com.zoho.dzide.zide.DeploymentConfigPatcher
 import com.zoho.dzide.zide.DeploymentPropertiesDialog
 import com.zoho.dzide.zide.ZideConfigParser
@@ -400,6 +401,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 gitPath, "clone", "--progress", "-b", branchArg,
                 repositoryUrl, cloneDest.absolutePath
             ),
+            env = ZeroProxyManager.processEnv(),
             timeoutMs = 600_000,
             shouldCancel = {
                 try {
@@ -481,6 +483,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
 
         val wgetResult = ProcessUtil.executeStreamingAndWait(
             command = listOf("wget", "--progress=dot:giga", "-O", tempFile.toString(), buildUrl),
+            env = ZeroProxyManager.processEnv(),
             timeoutMs = 600_000,
             shouldCancel = {
                 try {
@@ -780,6 +783,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         log.info("Downloading hg_utils from: $hgUtilsUrl")
         val wgetResult = ProcessUtil.executeCapturing(
             command = listOf("wget", "-q", "-O", zipFile.absolutePath, hgUtilsUrl),
+            env = ZeroProxyManager.processEnv(),
             timeoutMs = 120_000
         )
         if (wgetResult.exitCode != 0) {
@@ -1011,6 +1015,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             val hookResult = ProcessUtil.executeCapturing(
                 command = com.zoho.dzide.util.ShellUtil.buildShellCommand(*cmdParts.toTypedArray()),
                 workingDir = projectDir.absolutePath,
+                env = ZeroProxyManager.processEnv(),
                 timeoutMs = 300_000
             )
 

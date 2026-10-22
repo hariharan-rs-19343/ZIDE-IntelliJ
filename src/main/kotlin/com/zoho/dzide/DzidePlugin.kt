@@ -9,6 +9,7 @@ import com.zoho.dzide.tomcat.TomcatServerProvider
 import com.zoho.dzide.update.PluginUpdateChecker
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.ProxyConfig
+import com.zoho.dzide.util.ZeroProxyManager
 import com.zoho.dzide.zide.ZideConfigParser
 import com.zoho.dzide.zide.ZideConfigRepoService
 import java.io.File
@@ -21,6 +22,7 @@ class DzidePlugin : ProjectActivity {
         log.info("DZIDE plugin initialized for project: ${project.name}")
 
         ProxyConfig.applyToSystemProperties()
+        syncZeroTrustProxy(project)
 
         val wgetrcFile = File(System.getProperty("user.home"), ".wgetrc")
         if (!wgetrcFile.exists()) {
@@ -42,6 +44,15 @@ class DzidePlugin : ProjectActivity {
                     }
                 }
             }
+        }
+    }
+
+    private fun syncZeroTrustProxy(project: Project) {
+        val server = TomcatServerProvider.getInstance(project).getServers().firstOrNull()
+        ZeroProxyManager.resolveEndpointForProject(project.basePath, server)
+        ApplicationManager.getApplication().invokeLater {
+            val message = ZeroProxyManager.syncIdeProxy() ?: return@invokeLater
+            if (!project.isDisposed) NotificationUtil.info(project, message)
         }
     }
 

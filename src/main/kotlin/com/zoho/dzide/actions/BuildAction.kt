@@ -4,6 +4,8 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.zoho.dzide.deploysync.AntResolver
 import com.zoho.dzide.util.NotificationUtil
+import com.zoho.dzide.util.ShellUtil
+import com.zoho.dzide.util.ZeroProxyManager
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 import java.nio.file.Path
 import kotlin.io.path.exists
@@ -31,7 +33,8 @@ class BuildAction : AnAction("Build", "Run ANT build script", null) {
         }
         val antExe = AntResolver.resolveAntExecutable(antHome)
 
-        val antCommand = "export ANT_HOME='$antHome' && $antExe"
+        val exports = ShellUtil.buildExportChain(mapOf("ANT_HOME" to antHome) + ZeroProxyManager.processEnv())
+        val antCommand = (exports + listOf("&&", antExe.toString())).joinToString(" ")
 
         TerminalToolWindowManager.getInstance(project)
             .createLocalShellWidget(buildDir.toString(), "ZIDE Build: $productName", true)

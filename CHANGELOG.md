@@ -4,6 +4,26 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 
 ---
 
+## [0.1.3] — 2026-10-22
+
+### Added
+- **ZeroTrust (Zero Agent) proxy** — when `ZERO_HELPER_STATUS=ON` is set in `~/.zshrc` / `~/.bash_profile` / `~/.bashrc` (or the Windows environment), the plugin routes traffic through the Zero Agent at `127.0.0.1:3128`. Only `localhost` and `127.0.0.1` bypass it.
+  - The IntelliJ HTTP proxy is set at project open, which also covers CMTool and update checks.
+  - git, hg, wget, and ANT child processes get `http_proxy` / `https_proxy` / `no_proxy`.
+  - Tomcat gets `launch.proxy.vmargs` from the module `Zide.properties`, falling back to `zide/deployment/zide/Zide.properties`. It is added to `CATALINA_OPTS` once and skipped if `-Dhttp.proxyHost` is already set.
+- **Restore previous IDE proxy** — the IntelliJ proxy that was in place before the plugin changed it is saved and restored when the Zero Agent is later off. A proxy you changed by hand in the meantime is left alone.
+- **Settings → Tools → Zide → "Use ZeroTrust proxy"** — default on. Turn it off to leave all proxy settings untouched. `-Dzide.unalterproxy=true` also skips IDE proxy changes (Eclipse parity).
+
+---
+
+## [0.1.2] — 2026-10-05
+
+### Fixed
+- **M19 install.xml database name** — the database name is taken from `.zide_resources/zide_properties.xml` (`ZIDE_DB_NAME`) instead of a stale `configuration.properties`. Server start stops with a clear error when the name is missing, instead of starting against the wrong database.
+- **Eclipse-compatible replacements** — install.xml text and XML replacements use Eclipse regex semantics, so recipes patch the same values as Eclipse ZIDE.
+
+---
+
 ## [0.1.1] — 2026-08-23
 
 ### Fixed

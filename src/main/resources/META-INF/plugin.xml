@@ -53,6 +53,18 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.1.3</b>
+        <ul>
+            <li>ZeroTrust proxy — when ZERO_HELPER_STATUS=ON, IntelliJ, git/hg/wget/ANT, and Tomcat use the Zero Agent (127.0.0.1:3128); only localhost bypasses</li>
+            <li>Tomcat gets launch.proxy.vmargs from Zide.properties once, only while the Zero Agent is on</li>
+            <li>Previous IntelliJ proxy is restored when the Zero Agent is off</li>
+            <li>Settings → Tools → Zide → "Use ZeroTrust proxy" (default on)</li>
+        </ul>
+        <b>0.1.2</b>
+        <ul>
+            <li>M19 install.xml database name read from .zide_resources (ZIDE_DB_NAME); start stops with a clear error when it is missing</li>
+            <li>install.xml replacements use Eclipse regex semantics</li>
+        </ul>
         <b>0.1.1</b>
         <ul>
             <li>ANT build runs in IntelliJ Terminal tab — full Ctrl+C kill, scroll-back, and copy/paste support</li>

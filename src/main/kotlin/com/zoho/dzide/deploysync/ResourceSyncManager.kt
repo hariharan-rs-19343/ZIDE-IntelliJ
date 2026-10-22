@@ -13,6 +13,7 @@ import com.zoho.dzide.parser.PathResolver
 import com.zoho.dzide.tomcat.TomcatServerProvider
 import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.util.ShellUtil
+import com.zoho.dzide.util.ZeroProxyManager
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -179,7 +180,7 @@ class ResourceSyncManager(private val project: Project) : Disposable {
 
         log("Running ANT target '$target' for project ${Path.of(projectRoot).fileName}.")
         try {
-            ProcessUtil.executeCapturing(command, projectRoot)
+            ProcessUtil.executeCapturing(command, projectRoot, ZeroProxyManager.processEnv())
         } catch (e: Exception) {
             log("ANT target '$target' failed: ${e.message}")
         }

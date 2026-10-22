@@ -5,6 +5,7 @@ import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
 import com.zoho.dzide.settings.ZideSettingsState
 import com.zoho.dzide.util.ProcessUtil
+import com.zoho.dzide.util.ZeroProxyManager
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -198,6 +199,7 @@ object ZideConfigRepoService {
         indicator?.text2 = "hg clone $CLONE_URL"
         val result = ProcessUtil.executeStreamingAndWait(
             command = listOf(hg, "clone", "-b", BRANCH, authUrl, zideDir.absolutePath),
+            env = ZeroProxyManager.processEnv(),
             timeoutMs = CLONE_TIMEOUT_MS,
             shouldCancel = { checkCanceled(indicator) },
             onStdout = { chunk -> setProgressLine(indicator, chunk) },
@@ -226,6 +228,7 @@ object ZideConfigRepoService {
         val result = ProcessUtil.executeStreamingAndWait(
             command = listOf(hg, "pull", "-u", "-b", BRANCH, authUrl),
             workingDir = zideDir.absolutePath,
+            env = ZeroProxyManager.processEnv(),
             timeoutMs = PULL_TIMEOUT_MS,
             shouldCancel = { checkCanceled(indicator) },
             onStdout = { chunk -> setProgressLine(indicator, chunk) },

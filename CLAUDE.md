@@ -3,7 +3,7 @@
 ## Project Identity
 
 - Plugin ID: `com.zoho.dzide`
-- Current Version: 0.1.1
+- Current Version: 0.1.3
 - Language: Kotlin 2.2.0, JVM 21
 - Build: Gradle 9.0 (Kotlin DSL), IntelliJ Platform Plugin 2.16.0
 - Target IDE: IntelliJ IDEA 2024.3+ (Community or Ultimate)
@@ -36,7 +36,7 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 - `persistence/` — TomcatServerState (dzide/tomcat-servers.xml), ZideCacheState (dzide/eclipse-zide.xml)
 - `runconfig/` — TomcatConfigurationType, TomcatRunConfiguration, TomcatRunState, Editor, Options, Factory
 - `toolwindow/` — TomcatToolWindowFactory, TomcatToolbar, TomcatTreeModel, TomcatTreeCellRenderer, TomcatTreePopupHandler
-- `util/` — ProcessUtil, ShellUtil, PortUtil, NotificationUtil, ConsoleUtil
+- `util/` — ProcessUtil, ShellUtil, PortUtil, NotificationUtil, ConsoleUtil, ZeroProxy (Zero Agent detection, launch.proxy.vmargs), ZeroProxyManager (IDE proxy apply/restore, child-process proxy env)
 - `settings/` — ZideSettingsState, ZideSettingsConfigurable, CmToolConfigurable, WgetConfigurable, GitConfigurable, ZohoRepoConfigurable, PasswordFieldWithToggle
 - `update/` — PluginUpdateChecker (GitHub releases auto-update)
 

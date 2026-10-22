@@ -24,7 +24,12 @@ class ZideSettingsState : PersistentStateComponent<ZideSettingsState.State> {
         var zohoRepoUsername: String = "",
         var customBuildUrl: String = "",
         /** Eclipse zide.pref.need_replacer_everystart — when true, config replace runs every start. */
-        var replacerEveryStart: Boolean = true
+        var replacerEveryStart: Boolean = true,
+        var useZeroTrustProxy: Boolean = true,
+        /** True while the IntelliJ proxy points at the Zero Agent because of this plugin. */
+        var zeroProxyApplied: Boolean = false,
+        /** IntelliJ proxy before the Zero Agent proxy was applied ([com.zoho.dzide.util.SavedIdeProxy.encode]). */
+        var savedIdeProxy: String = ""
     )
 
     private var myState = State()
@@ -62,6 +67,18 @@ class ZideSettingsState : PersistentStateComponent<ZideSettingsState.State> {
     var replacerEveryStart: Boolean
         get() = myState.replacerEveryStart
         set(value) { myState.replacerEveryStart = value }
+
+    var useZeroTrustProxy: Boolean
+        get() = myState.useZeroTrustProxy
+        set(value) { myState.useZeroTrustProxy = value }
+
+    var zeroProxyApplied: Boolean
+        get() = myState.zeroProxyApplied
+        set(value) { myState.zeroProxyApplied = value }
+
+    var savedIdeProxy: String
+        get() = myState.savedIdeProxy
+        set(value) { myState.savedIdeProxy = value }
 
     fun getPassword(key: String): String {
         val attributes = credentialAttributes(key)

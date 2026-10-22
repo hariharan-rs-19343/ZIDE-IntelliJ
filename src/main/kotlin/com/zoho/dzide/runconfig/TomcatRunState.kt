@@ -14,6 +14,8 @@ import com.zoho.dzide.tomcat.TomcatServerProvider
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.PortUtil
 import com.zoho.dzide.util.ShellUtil
+import com.zoho.dzide.util.ZeroProxy
+import com.zoho.dzide.util.ZeroProxyManager
 
 class TomcatRunState(
     environment: ExecutionEnvironment,
@@ -52,8 +54,8 @@ class TomcatRunState(
             serverProvider.updateServer(server.id, mapOf("debugPort" to debugPort))
         }
 
-        server.manualLaunchArgs?.let {
-            if (it.isNotBlank()) envVars["CATALINA_OPTS"] = it
+        ZeroProxy.mergeLaunchArgs(server.manualLaunchArgs, ZeroProxyManager.launchProxyArgs(server))?.let {
+            envVars["CATALINA_OPTS"] = it
         }
 
         val commandLine = GeneralCommandLine("sh", script.toString(), *catalinaCommand.split(" ").toTypedArray())

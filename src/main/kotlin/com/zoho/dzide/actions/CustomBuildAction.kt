@@ -15,6 +15,7 @@ import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.util.ConsoleUtil
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.ProcessUtil
+import com.zoho.dzide.util.ZeroProxyManager
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -85,6 +86,7 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
 
                         val handler = ProcessUtil.executeStreaming(
                             command = wgetCommand,
+                            env = ZeroProxyManager.processEnv(),
                             onStdout = { },
                             onStderr = { text ->
                                 parseWgetProgress(text)?.let { percent ->
