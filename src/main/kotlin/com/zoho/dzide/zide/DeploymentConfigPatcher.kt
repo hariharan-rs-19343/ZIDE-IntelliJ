@@ -3,7 +3,9 @@ package com.zoho.dzide.zide
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.zoho.dzide.util.NotificationUtil
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -38,7 +40,9 @@ object DeploymentConfigPatcher {
         val dbUser: String?,
         val dbPass: String?,
         val dbHost: String?,
-        val schemaName: String?
+        val schemaName: String?,
+        /** `{deploymentFolder}/{deploy.folder.basepath}` — see [com.zoho.dzide.parser.PathResolver.resolveTomcatHome]. */
+        val tomcatHome: String = Path.of(deploymentFolder, "AdventNet", "Sas", "tomcat").toString()
     ) {
         val isPgsql: Boolean get() = dbType?.uppercase() == "PGSQL"
     }
@@ -77,7 +81,7 @@ object DeploymentConfigPatcher {
         val securityOk = try { patchSecurityProperties(ctx) } catch (e: Exception) { errors.add("security-properties.xml: ${e.message}"); false }
         val configPropsOk = try { patchConfigurationProperties(ctx) } catch (e: Exception) { errors.add("configuration.properties: ${e.message}"); false }
 
-        val keystorePath = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "sas.keystore")
+        val keystorePath = Path.of(ctx.tomcatHome, "conf", "sas.keystore")
         val keystoreMissing = !keystorePath.exists()
         if (keystoreMissing) {
             val msg = "tomcat/conf/sas.keystore not found — HTTPS will fail. App. Server container must ship the keystore."
@@ -105,7 +109,7 @@ object DeploymentConfigPatcher {
      */
     fun ensureHttpsConnector(ctx: PatchContext): Boolean {
         val port = ctx.httpsPort?.takeIf { it.isNotBlank() } ?: "8443"
-        val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
+        val serverXml = Path.of(ctx.tomcatHome, "conf", "server.xml")
         if (!serverXml.exists()) return false
 
         val sslConnector =
@@ -159,7 +163,7 @@ object DeploymentConfigPatcher {
     }
 
     fun patchServerXml(ctx: PatchContext): Boolean {
-        val serverXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "server.xml")
+        val serverXml = Path.of(ctx.tomcatHome, "conf", "server.xml")
         if (!serverXml.exists()) return false
 
         var content = serverXml.readText()
@@ -241,7 +245,7 @@ $JSP_SERVLET_MARKER
 $JSP_SERVLET_MARKER"""
 
     fun patchWebXml(ctx: PatchContext): Boolean {
-        val webXml = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "conf", "web.xml")
+        val webXml = Path.of(ctx.tomcatHome, "conf", "web.xml")
         if (!webXml.exists()) return false
 
         var content = webXml.readText()
@@ -274,7 +278,7 @@ $JSP_SERVLET_MARKER"""
      * Replicates Eclipse's pgsql_replace.xml / mysql_replace.xml logic.
      */
     fun patchConfigurationProperties(ctx: PatchContext): Boolean {
-        val webappDir = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "webapps", ctx.parentService)
+        val webappDir = Path.of(ctx.tomcatHome, "webapps", ctx.parentService)
         val configProps = webappDir.resolve("WEB-INF").resolve("conf").resolve("configuration.properties")
         if (!configProps.exists()) return false
 
@@ -344,7 +348,7 @@ $JSP_SERVLET_MARKER"""
      * - StartDBServer: "false"
      */
     fun patchPersistenceConfig(ctx: PatchContext): Boolean {
-        val webappDir = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "webapps", ctx.parentService)
+        val webappDir = Path.of(ctx.tomcatHome, "webapps", ctx.parentService)
         val persistenceXml = webappDir.resolve("WEB-INF").resolve("conf").resolve("Persistence")
             .resolve("persistence-configurations.xml")
         if (!persistenceXml.exists()) return false
@@ -378,7 +382,7 @@ $JSP_SERVLET_MARKER"""
     }
 
     fun patchSecurityProperties(ctx: PatchContext): Boolean {
-        val webappDir = Path.of(ctx.deploymentFolder, "AdventNet", "Sas", "tomcat", "webapps", ctx.parentService)
+        val webappDir = Path.of(ctx.tomcatHome, "webapps", ctx.parentService)
         val securityXml = webappDir.resolve("WEB-INF").resolve("security-properties.xml")
         if (!securityXml.exists()) return false
 
@@ -421,11 +425,12 @@ $JSP_SERVLET_MARKER"""
 
     fun buildPatchContext(
         serviceProps: Map<String, String>,
-        zideProps: Map<String, String>
+        zideProps: Map<String, String>,
+        tomcatHome: String? = null
     ): PatchContext? {
         val deploymentFolder = serviceProps["ZIDE.DEPLOYMENT_FOLDER"] ?: return null
         val parentService = serviceProps["ZIDE.PARENT_SERVICE"] ?: return null
-        return PatchContext(
+        val base = PatchContext(
             deploymentFolder = deploymentFolder,
             parentService = parentService,
             iamServer = zideProps["ZIDE.IAM_SERVER"],
@@ -440,6 +445,20 @@ $JSP_SERVLET_MARKER"""
             dbHost = zideProps["ZIDE_DB_HOST"],
             schemaName = zideProps["ZIDE.SCHEMA_NAME"]
         )
+        return if (tomcatHome.isNullOrBlank()) base else base.copy(tomcatHome = tomcatHome)
+    }
+
+    /**
+     * Eclipse createTomcatSetup: `conf/server.xml.orig` (already processed by install.xml) becomes
+     * `conf/server.xml`. Context / shutdown port are applied afterwards by [patchServerXml].
+     * Returns false when there is no `.orig` to rebuild from.
+     */
+    fun rebuildServerXmlFromOrig(ctx: PatchContext): Boolean {
+        val confDir = Path.of(ctx.tomcatHome, "conf")
+        val orig = confDir.resolve("server.xml.orig")
+        if (!orig.exists()) return false
+        Files.copy(orig, confDir.resolve("server.xml"), StandardCopyOption.REPLACE_EXISTING)
+        return true
     }
 
     /**

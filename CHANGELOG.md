@@ -4,6 +4,23 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 
 ---
 
+## [0.1.4] — 2026-11-20
+
+### Fixed
+- **install.xml XML replacements match Eclipse ZIDE** — regex rules now apply to the element's attributes, not its text, and `newAttribute` rules add an attribute. Before, server.xml rules (HTTP/HTTPS ports, SSL connector, `deployOnStartup`) did nothing, and `newAttribute` rules wiped the element's children (e.g. the `<Host>` Valves) in `conf/server.xml.orig`.
+- **Replacements are stable across starts** — XML files are written without re-indenting, so repeated starts no longer add blank lines.
+
+### Changed
+- **server.xml built from install.xml on every start (no Eclipse needed)** — like Eclipse `createTomcatSetup`, `conf/server.xml.orig` (after install.xml) is copied to `conf/server.xml`, then Context, shutdown port, `deployOnStartup` and HTTP port are applied. This runs on every start, even when replacement is already done.
+- **`Servers/<service>-config` is a fallback only** — Eclipse WTP's `server.xml` copy is used only when the deployment has no `conf/server.xml.orig`.
+- **Tomcat home from ZIDE config** — config patching uses `ZIDE.DEPLOYMENT_FOLDER` + `deploy.folder.basepath` (module `Zide.properties`) instead of a hardcoded `AdventNet/Sas/tomcat`. A warning is logged if it differs from the server path.
+- **Webapp server.xml copy happens last** — `webapps/<service>/WEB-INF/conf/server.xml` gets the final `conf/server.xml`. Run configurations also get it now.
+
+### Upgrade note
+If a deployment was started with 0.1.3 or earlier, its `conf/server.xml.orig` may be damaged (missing Valves, `deployOnStartup=false` written as text inside `<Host>`). Restore it from the build zip or run **Update Deployment** before starting.
+
+---
+
 ## [0.1.3] — 2026-10-22
 
 ### Added

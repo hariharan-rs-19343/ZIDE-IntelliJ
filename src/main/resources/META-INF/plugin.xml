@@ -53,6 +53,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.1.4</b>
+        <ul>
+            <li>install.xml XML rules match Eclipse ZIDE: regex rules apply to the element's attributes, and newAttribute rules add an attribute instead of wiping the element's children</li>
+            <li>server.xml is built from conf/server.xml.orig on every start (Eclipse createTomcatSetup parity); Eclipse's Servers/ folder is no longer needed</li>
+            <li>Tomcat home comes from ZIDE.DEPLOYMENT_FOLDER + deploy.folder.basepath instead of a hardcoded path</li>
+            <li>The webapp WEB-INF/conf/server.xml copy gets the final server.xml</li>
+        </ul>
         <b>0.1.3</b>
         <ul>
             <li>ZeroTrust proxy — when ZERO_HELPER_STATUS=ON, IntelliJ, git/hg/wget/ANT, and Tomcat use the Zero Agent (127.0.0.1:3128); only localhost bypasses</li>

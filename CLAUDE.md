@@ -3,7 +3,7 @@
 ## Project Identity
 
 - Plugin ID: `com.zoho.dzide`
-- Current Version: 0.1.3
+- Current Version: 0.1.4
 - Language: Kotlin 2.2.0, JVM 21
 - Build: Gradle 9.0 (Kotlin DSL), IntelliJ Platform Plugin 2.16.0
 - Target IDE: IntelliJ IDEA 2024.3+ (Community or Ultimate)
@@ -55,7 +55,7 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 
 ## Server Lifecycle
 
-- **Start:** configureProjectLibraries → configureCompilerOutput → buildProjectAndWait → cleanWorkDir → pre-start scripts → syncServerXml → patchDeploymentConfigs → `sh catalina.sh run` with CATALINA_OPTS
+- **Start:** configureProjectLibraries → configureCompilerOutput → buildProjectAndWait → cleanWorkDir → pre-start scripts → patchDeploymentConfigs (install.xml → server.xml.orig → server.xml → webapp copy; `Servers/` only when no .orig) → `sh catalina.sh run` with CATALINA_OPTS
 - **Debug:** same as start but `sh catalina.sh jpda run` with JPDA_ADDRESS=*:port, then auto-attaches RemoteConfiguration; auto hot-swap enabled (no dialog)
 - **Stop:** destroyProcess → fallback catalina.sh stop -force → lsof + kill -9
 - **Dispose:** on IDE quit, all processes destroyed + force-kill by port

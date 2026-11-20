@@ -14,6 +14,7 @@ import com.intellij.openapi.roots.CompilerModuleExtension
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.roots.OrderRootType
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
+import com.zoho.dzide.config.replacer.ConfigReplacerRunner
 import com.zoho.dzide.model.TomcatServer
 import com.zoho.dzide.parser.ModuleZidePropsParser
 import com.zoho.dzide.parser.PathResolver
@@ -126,7 +127,6 @@ class TomcatManager(private val project: Project) : Disposable {
         return env
     }
 
-    @Suppress("UNUSED_PARAMETER")
     fun patchDeploymentConfigs(server: TomcatServer, force: Boolean = false): Boolean {
         val projectPath = project.basePath ?: return false
         ZideConfigParser.clearCache(projectPath)
@@ -143,21 +143,63 @@ class TomcatManager(private val project: Project) : Disposable {
             return false
         }
 
-        val forceEveryStart = force || com.zoho.dzide.settings.ZideSettingsState.getInstance().replacerEveryStart
-        val willPatch = DeploymentConfigPatcher.shouldReplace(serviceProps, forceEveryStart)
-        if (!willPatch) {
-            log("Skipping config patching: ZIDE.DO_REPLACE=true (already applied).")
-            return true
-        }
-
-        val patchCtx = DeploymentConfigPatcher.buildPatchContext(serviceProps, zideProps)
-        if (patchCtx == null) {
+        val deploymentFolder = serviceProps["ZIDE.DEPLOYMENT_FOLDER"]
+        if (deploymentFolder == null || serviceProps["ZIDE.PARENT_SERVICE"] == null) {
             log("Skipping config patching: missing DEPLOYMENT_FOLDER or PARENT_SERVICE.")
             return true
         }
+        val tomcatHome = ConfigReplacerRunner.resolveReplaceRoot(projectPath, serviceProps, deploymentFolder)
+        if (Path.of(tomcatHome).normalize() != Path.of(server.path).normalize()) {
+            logError("Tomcat home from ZIDE config ($tomcatHome) differs from server path (${server.path}); configs are applied to $tomcatHome.")
+        }
+        val patchCtx = DeploymentConfigPatcher.buildPatchContext(serviceProps, zideProps, tomcatHome)
+            ?: return true
+        val hasInstallXml = ConfigReplacerRunner.resolveInstallXml(projectPath, serviceProps) != null
 
+        copyEclipseServersServerXml(server, patchCtx)
+
+        val forceEveryStart = force || com.zoho.dzide.settings.ZideSettingsState.getInstance().replacerEveryStart
+        if (DeploymentConfigPatcher.shouldReplace(serviceProps, forceEveryStart)) {
+            applyConfigReplacements(projectPath, serviceProps, zideProps, patchCtx, hasInstallXml)
+            ZideConfigParser.setServiceProperty(projectPath, "ZIDE.DO_REPLACE", "true")
+        } else {
+            log("Skipping config replacement: ZIDE.DO_REPLACE=true (already applied).")
+        }
+
+        // Eclipse createTomcatSetup runs on every launch, independent of DO_REPLACE.
+        if (hasInstallXml) buildServerXml(patchCtx)
+        copyServerXmlToWebapp(server, patchCtx)
+        return true
+    }
+
+    /**
+     * Eclipse createTomcatSetup parity: server.xml.orig (processed by install.xml) → server.xml,
+     * then Context / shutdown port / deployOnStartup / HTTP port.
+     */
+    private fun buildServerXml(patchCtx: DeploymentConfigPatcher.PatchContext) {
+        try {
+            if (!DeploymentConfigPatcher.rebuildServerXmlFromOrig(patchCtx)) {
+                log("conf/server.xml.orig not found; keeping existing conf/server.xml.")
+                return
+            }
+            log("Rebuilt conf/server.xml from conf/server.xml.orig.")
+            if (DeploymentConfigPatcher.patchServerXml(patchCtx)) {
+                log("  Patched server.xml (Context, shutdown port, deployOnStartup, HTTP port)")
+            }
+        } catch (e: Exception) {
+            logError("Failed to build server.xml: ${e.message}")
+        }
+    }
+
+    private fun applyConfigReplacements(
+        projectPath: String,
+        serviceProps: Map<String, String>,
+        zideProps: Map<String, String>,
+        patchCtx: DeploymentConfigPatcher.PatchContext,
+        hasInstallXml: Boolean
+    ) {
         // Prefer product install.xml / install.properties; fall back to hardcoded patcher.
-        val replacerResult = com.zoho.dzide.config.replacer.ConfigReplacerRunner.run(
+        val replacerResult = ConfigReplacerRunner.run(
             projectPath = projectPath,
             deploymentFolder = patchCtx.deploymentFolder,
             serviceProps = serviceProps,
@@ -165,16 +207,12 @@ class TomcatManager(private val project: Project) : Disposable {
             branch = serviceProps["ZIDE.REPOSITORY_TRUNK"] ?: "default"
         )
 
-        if (replacerResult.applied) {
+        if (replacerResult.applied || hasInstallXml) {
             log("Applied data-driven config replacements (${replacerResult.filesTouched} file(s)).")
             for (msg in replacerResult.messages) log("  $msg")
         } else {
             log("Patching deployment configs for ${patchCtx.parentService}...")
             val result = DeploymentConfigPatcher.patchAll(patchCtx, project)
-            if (result.skipped) {
-                log("  Skipping config patching: ZIDE.DO_REPLACE=true (already applied).")
-                return true
-            }
             if (result.httpsPortUpdated) log("  Rewrote HTTPS Connector (SSLEnabled + sas.keystore); preserved HTTP connector")
             if (result.serverXmlPatched) log("  Patched server.xml (Context, shutdown port, HTTP port)")
             if (result.webXmlPatched) log("  Patched web.xml (JSP servlet for dynamic compilation)")
@@ -192,9 +230,6 @@ class TomcatManager(private val project: Project) : Disposable {
                 log("  Config files already up to date.")
             }
         }
-
-        ZideConfigParser.setServiceProperty(projectPath, "ZIDE.DO_REPLACE", "true")
-        return true
     }
 
     /**
@@ -232,61 +267,45 @@ class TomcatManager(private val project: Project) : Disposable {
     }
 
     /**
-     * Copies server.xml files to the correct locations before Tomcat starts.
-     *
-     * Step 1: Copy tomcat/conf/server.xml → webapps/{parentService}/WEB-INF/conf/server.xml
-     *         (the app needs a copy of the current tomcat conf server.xml)
-     * Step 2: Copy Servers/{parentService}-config/server.xml → tomcat/conf/server.xml
-     *         (Eclipse's managed server.xml with Context element, SSL, etc. becomes the active tomcat config)
-     *
-     * These two server.xml files have different content — each copy is verified before proceeding.
+     * Legacy fallback for deployments without tomcat/conf/server.xml.orig:
+     * copy Eclipse WTP's Servers/{parentService}-config/server.xml → tomcat/conf/server.xml.
+     * When server.xml.orig exists, server.xml is built from it instead (see [buildServerXml]).
      */
-    private fun syncServerXmlFiles(server: TomcatServer) {
-        val deploymentFolder = server.zideRuntimeProperties?.get("ZIDE.DEPLOYMENT_FOLDER") ?: return
-        val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE")
-            ?: run {
-                val projectPath = project.basePath ?: return
-                val zideConfig = ZideConfigParser.readZideConfig(projectPath) ?: return
-                zideConfig.service?.properties?.get("ZIDE.PARENT_SERVICE") ?: return
-            }
-
-        val tomcatConfDir = Path.of(deploymentFolder, "AdventNet", "Sas", "tomcat", "conf")
-        val tomcatConfServerXml = tomcatConfDir.resolve("server.xml")
-        val webappConfDir = Path.of(deploymentFolder, "AdventNet", "Sas", "tomcat", "webapps", parentService, "WEB-INF", "conf")
-        val webappConfServerXml = webappConfDir.resolve("server.xml")
+    private fun copyEclipseServersServerXml(server: TomcatServer, patchCtx: DeploymentConfigPatcher.PatchContext) {
+        val tomcatConfDir = Path.of(patchCtx.tomcatHome, "conf")
+        if (tomcatConfDir.resolve("server.xml.orig").exists()) return
+        val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE") ?: patchCtx.parentService
 
         // Resolve Servers/{parentService}-config/ relative to workspace root
         // Deployment folder is {workspace}/deployment/{service}, so workspace = deployment/../..
-        val workspaceRoot = Path.of(deploymentFolder).parent?.parent
-        val serversConfigDir = workspaceRoot?.resolve("Servers")?.resolve("$parentService-config")
-        val serversServerXml = serversConfigDir?.resolve("server.xml")
-
-        log("Syncing server.xml files...")
-
-        // Step 1: Copy tomcat/conf/server.xml → webapps/{parentService}/WEB-INF/conf/server.xml
-        if (tomcatConfServerXml.exists() && webappConfDir.exists()) {
-            Files.copy(tomcatConfServerXml, webappConfServerXml, StandardCopyOption.REPLACE_EXISTING)
-            log("  Copied tomcat/conf/server.xml → webapps/$parentService/WEB-INF/conf/server.xml")
-        } else {
-            if (!tomcatConfServerXml.exists()) logError("  tomcat/conf/server.xml not found, skipping copy to webapp.")
-            if (!webappConfDir.exists()) logError("  webapps/$parentService/WEB-INF/conf/ not found, skipping copy.")
-        }
-
-        // Step 2: Copy Servers/{parentService}-config/server.xml → tomcat/conf/server.xml
+        val workspaceRoot = Path.of(patchCtx.deploymentFolder).parent?.parent
+        val serversServerXml = workspaceRoot?.resolve("Servers")?.resolve("$parentService-config")?.resolve("server.xml")
         if (serversServerXml != null && serversServerXml.exists()) {
-            Files.copy(serversServerXml, tomcatConfServerXml, StandardCopyOption.REPLACE_EXISTING)
-            log("  Copied Servers/$parentService-config/server.xml → tomcat/conf/server.xml")
+            Files.copy(serversServerXml, tomcatConfDir.resolve("server.xml"), StandardCopyOption.REPLACE_EXISTING)
+            log("Copied Servers/$parentService-config/server.xml → tomcat/conf/server.xml")
         } else {
-            log("  Servers/$parentService-config/server.xml not found, skipping. Tomcat conf server.xml unchanged.")
+            log("Servers/$parentService-config/server.xml not found, skipping. Tomcat conf server.xml unchanged.")
         }
     }
 
     /**
-     * Runs all pre-start setup steps in order before launching Tomcat:
-     * 1. Execute postzidedeploy.sh (copies app.properties)
-     * 2. Copy tomcat/conf/server.xml → webapp WEB-INF/conf/
-     * 3. Copy Servers/{service}-config/server.xml → tomcat/conf/
+     * Copies the final tomcat/conf/server.xml → webapps/{parentService}/WEB-INF/conf/server.xml
+     * (the app needs a copy of the current tomcat conf server.xml).
      */
+    private fun copyServerXmlToWebapp(server: TomcatServer, patchCtx: DeploymentConfigPatcher.PatchContext) {
+        val parentService = server.zideRuntimeProperties?.get("ZIDE.PARENT_SERVICE") ?: patchCtx.parentService
+        val tomcatConfServerXml = Path.of(patchCtx.tomcatHome, "conf", "server.xml")
+        val webappConfDir = Path.of(patchCtx.tomcatHome, "webapps", parentService, "WEB-INF", "conf")
+
+        if (tomcatConfServerXml.exists() && webappConfDir.exists()) {
+            Files.copy(tomcatConfServerXml, webappConfDir.resolve("server.xml"), StandardCopyOption.REPLACE_EXISTING)
+            log("Copied tomcat/conf/server.xml → webapps/$parentService/WEB-INF/conf/server.xml")
+        } else {
+            if (!tomcatConfServerXml.exists()) logError("tomcat/conf/server.xml not found, skipping copy to webapp.")
+            if (!webappConfDir.exists()) logError("webapps/$parentService/WEB-INF/conf/ not found, skipping copy.")
+        }
+    }
+
     private fun cleanTomcatWorkDirectory(server: TomcatServer) {
         val workDir = Path.of(server.path, "work")
         if (workDir.exists()) {
@@ -458,6 +477,10 @@ class TomcatManager(private val project: Project) : Disposable {
         if (buildSuccess) log("Project build completed successfully.")
     }
 
+    /**
+     * Pre-start setup before launching Tomcat. server.xml is handled afterwards by
+     * [patchDeploymentConfigs] (install.xml → server.xml.orig → server.xml → webapp copy).
+     */
     fun runPreStartSetup(server: TomcatServer) {
         log("--- Pre-start setup ---")
         configureProjectLibraries(server)
@@ -465,7 +488,6 @@ class TomcatManager(private val project: Project) : Disposable {
         buildProjectAndWait(server)
         cleanTomcatWorkDirectory(server)
         runPostZideDeployScript(server)
-        syncServerXmlFiles(server)
         log("--- Pre-start setup complete ---")
     }
 
