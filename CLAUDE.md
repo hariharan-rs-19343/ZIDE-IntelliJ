@@ -115,6 +115,10 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 - Zoho Repository: Username + Password (PasswordSafe)
 - Application-level persistence in `dzide-settings.xml`
 - Passwords encrypted via IntelliJ PasswordSafe
+- Credential resolution (`settings/CredentialResolver`): Settings value wins; if blank, fall back to global — CMTool → `~/.zide/zide.conf` (`zide.cmtools.authtoken`); Wget → `~/.wgetrc` → `~/.netrc`; Git → `git credential fill` (osxkeychain etc.) → `~/.netrc`; Zoho Repo → `~/.hgrc [auth]` → `~/.netrc`
+- CMTool and Wget are mandatory: missing in both → action blocked with "Open Settings" dialog; startup balloon
+- Settings Git creds override the system helper per clone (`-c credential.helper=` + inline env helper); Settings Wget creds via temp `WGETRC`
+- Plugin never writes to the system credential store (no `git credential approve/reject`, no keychain writes)
 
 ## Keyboard Shortcuts
 

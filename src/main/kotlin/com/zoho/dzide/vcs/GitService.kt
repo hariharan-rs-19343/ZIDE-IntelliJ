@@ -1,7 +1,7 @@
 package com.zoho.dzide.vcs
 
 import com.intellij.openapi.diagnostic.Logger
-import com.zoho.dzide.settings.ZideSettingsState
+import com.zoho.dzide.settings.CredentialResolver
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.LsRemoteCommand
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
@@ -38,12 +38,8 @@ object GitService {
             .setRemote(repoUrl)
             .setHeads(true)
 
-        val settings = ZideSettingsState.getInstance()
-        val gitUsername = settings.gitUsername
-        val gitPassword = settings.getPassword(ZideSettingsState.KEY_GIT_PASSWORD)
-
-        if (gitUsername.isNotBlank() && gitPassword != null && gitPassword.isNotBlank()) {
-            cmd.setCredentialsProvider(UsernamePasswordCredentialsProvider(gitUsername, gitPassword))
+        CredentialResolver.resolveGit(repoUrl)?.let {
+            cmd.setCredentialsProvider(UsernamePasswordCredentialsProvider(it.username, it.secret))
         }
 
         return cmd.call().map { it.name }

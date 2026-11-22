@@ -4,6 +4,9 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
+import com.zoho.dzide.settings.CmToolConfigurable
+import com.zoho.dzide.settings.CredentialResolver
+import com.zoho.dzide.settings.WgetConfigurable
 import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.tomcat.TomcatServerProvider
 import com.zoho.dzide.update.PluginUpdateChecker
@@ -24,13 +27,7 @@ class DzidePlugin : ProjectActivity {
         ProxyConfig.applyToSystemProperties()
         syncZeroTrustProxy(project)
 
-        val wgetrcFile = File(System.getProperty("user.home"), ".wgetrc")
-        if (!wgetrcFile.exists()) {
-            NotificationUtil.warn(
-                project,
-                "~/.wgetrc file is missing. Configure Wget credentials in Settings > Tools > Zide > Wget Configuration."
-            )
-        }
+        warnMissingMandatoryCredentials(project)
 
         autoConfigureLibraries(project)
 
@@ -44,6 +41,26 @@ class DzidePlugin : ProjectActivity {
                     }
                 }
             }
+        }
+    }
+
+    /** CMTool and Wget are mandatory: Settings value, else global (~/.zide/zide.conf, ~/.wgetrc / ~/.netrc). */
+    private fun warnMissingMandatoryCredentials(project: Project) {
+        if (CredentialResolver.resolveWget() == null) {
+            NotificationUtil.warn(
+                project,
+                "Wget credential not found in Settings, ~/.wgetrc or ~/.netrc. " +
+                    "Configure it in Settings > Tools > Zide > Wget Configuration.",
+                NotificationUtil.openSettingsAction(WgetConfigurable::class.java)
+            )
+        }
+        if (CredentialResolver.resolveCmToolToken() == null) {
+            NotificationUtil.warn(
+                project,
+                "CMTool Auth Token not found in Settings or ~/.zide/zide.conf. " +
+                    "Configure it in Settings > Tools > Zide > CMTool.",
+                NotificationUtil.openSettingsAction(CmToolConfigurable::class.java)
+            )
         }
     }
 

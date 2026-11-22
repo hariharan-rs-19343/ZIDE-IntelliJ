@@ -3,6 +3,7 @@ package com.zoho.dzide.settings
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import java.awt.FlowLayout
@@ -16,6 +17,7 @@ class GitConfigurable : Configurable {
     private var gitPathField: TextFieldWithBrowseButton? = null
     private var usernameField: JBTextField? = null
     private var passwordField: PasswordFieldWithToggle? = null
+    private var hintLabel: JBLabel? = null
     private var panel: JPanel? = null
 
     override fun getDisplayName(): String = "Git"
@@ -38,11 +40,13 @@ class GitConfigurable : Configurable {
 
         usernameField = JBTextField()
         passwordField = PasswordFieldWithToggle()
+        hintLabel = GlobalCredentialHint.createLabel()
 
         panel = FormBuilder.createFormBuilder()
             .addLabeledComponent("Git Path:", pathPanel, 1, false)
             .addLabeledComponent("Username:", usernameField!!, 1, false)
             .addLabeledComponent("Password:", passwordField!!, 1, false)
+            .addComponentToRightColumn(hintLabel!!, 1)
             .addComponentFillVertically(JPanel(), 0)
             .panel
 
@@ -85,6 +89,7 @@ class GitConfigurable : Configurable {
         settings.gitPath = gitPathField?.text?.trim() ?: ""
         settings.gitUsername = usernameField?.text?.trim() ?: ""
         settings.setPassword(ZideSettingsState.KEY_GIT_PASSWORD, passwordField?.text ?: "")
+        updateHintLabel()
     }
 
     override fun reset() {
@@ -92,12 +97,26 @@ class GitConfigurable : Configurable {
         gitPathField?.text = settings.gitPath
         usernameField?.text = settings.gitUsername
         passwordField?.text = settings.getPassword(ZideSettingsState.KEY_GIT_PASSWORD)
+        updateHintLabel()
+    }
+
+    /** Git's helper is queried per host at clone time, so no lookup here (read-only, never prompts). */
+    private fun updateHintLabel() {
+        val filled = !usernameField?.text.isNullOrBlank() && !passwordField?.text.isNullOrEmpty()
+        GlobalCredentialHint.update(
+            hintLabel,
+            fieldsFilled = filled,
+            globalSource = null,
+            lookedIn = "git's credential helper (e.g. osxkeychain) or ${CredentialResolver.SOURCE_NETRC}",
+            mandatory = false
+        )
     }
 
     override fun disposeUIResources() {
         gitPathField = null
         usernameField = null
         passwordField = null
+        hintLabel = null
         panel = null
     }
 }

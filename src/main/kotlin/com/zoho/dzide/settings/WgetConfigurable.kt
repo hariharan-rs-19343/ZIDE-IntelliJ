@@ -1,7 +1,6 @@
 package com.zoho.dzide.settings
 
 import com.intellij.openapi.options.Configurable
-import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
@@ -13,7 +12,7 @@ class WgetConfigurable : Configurable {
 
     private var usernameField: JBTextField? = null
     private var passwordField: PasswordFieldWithToggle? = null
-    private var errorLabel: JBLabel? = null
+    private var hintLabel: JBLabel? = null
     private var panel: JPanel? = null
 
     override fun getDisplayName(): String = "Wget Configuration"
@@ -22,9 +21,7 @@ class WgetConfigurable : Configurable {
         usernameField = JBTextField()
         passwordField = PasswordFieldWithToggle()
 
-        errorLabel = JBLabel()
-        errorLabel!!.foreground = JBColor.RED
-        updateErrorLabel()
+        hintLabel = GlobalCredentialHint.createLabel()
 
         val helpText = "<html><small>Refer the link below to get the credential:<br>" +
                 "<a href=\"https://learn.zoho.in/portal/zohocorp/manual/zide-faqs/article/wgetrc-file-is-missing\">" +
@@ -33,9 +30,9 @@ class WgetConfigurable : Configurable {
         helpLabel.setCopyable(true)
 
         panel = FormBuilder.createFormBuilder()
-            .addComponent(errorLabel!!, 0)
             .addLabeledComponent("Username:", usernameField!!, 1, false)
             .addLabeledComponent("Password:", passwordField!!, 1, false)
+            .addComponentToRightColumn(hintLabel!!, 1)
             .addComponentToRightColumn(helpLabel, 1)
             .addComponentFillVertically(JPanel(), 0)
             .panel
@@ -43,15 +40,15 @@ class WgetConfigurable : Configurable {
         return panel!!
     }
 
-    private fun updateErrorLabel() {
-        val wgetrcFile = File(System.getProperty("user.home"), ".wgetrc")
-        if (!wgetrcFile.exists()) {
-            errorLabel?.text = "~/.wgetrc not found. Credentials will be written when you click Apply."
-            errorLabel?.isVisible = true
-        } else {
-            errorLabel?.text = ""
-            errorLabel?.isVisible = false
-        }
+    private fun updateHintLabel() {
+        val filled = !usernameField?.text.isNullOrBlank() && !passwordField?.text.isNullOrEmpty()
+        GlobalCredentialHint.update(
+            hintLabel,
+            fieldsFilled = filled,
+            globalSource = if (filled) null else CredentialResolver.resolveWgetGlobal()?.source,
+            lookedIn = "${CredentialResolver.SOURCE_WGETRC} or ${CredentialResolver.SOURCE_NETRC}",
+            mandatory = true
+        )
     }
 
     override fun isModified(): Boolean {
@@ -73,7 +70,7 @@ class WgetConfigurable : Configurable {
         if (username.isNotEmpty() && password.isNotEmpty()) {
             writeWgetrc(username, password)
         }
-        updateErrorLabel()
+        updateHintLabel()
     }
 
     private fun writeWgetrc(username: String, password: String) {
@@ -103,13 +100,13 @@ class WgetConfigurable : Configurable {
         val settings = ZideSettingsState.getInstance()
         usernameField?.text = settings.wgetUsername
         passwordField?.text = settings.getPassword(ZideSettingsState.KEY_WGET_PASSWORD)
-        updateErrorLabel()
+        updateHintLabel()
     }
 
     override fun disposeUIResources() {
         usernameField = null
         passwordField = null
-        errorLabel = null
+        hintLabel = null
         panel = null
     }
 }

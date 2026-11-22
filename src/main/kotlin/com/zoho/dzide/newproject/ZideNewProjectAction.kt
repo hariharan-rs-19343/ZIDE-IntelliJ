@@ -12,7 +12,7 @@ class ZideNewProjectAction : AnAction("New Project", "Create a new ZIDE project"
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project
 
-        if (!ZideProjectCreator.ensureCmToolToken()) return
+        if (!ZideProjectCreator.ensureMandatoryCredentials(project)) return
 
         val dialog = ZideProjectWizardDialog(project)
         if (!dialog.showAndGet()) return

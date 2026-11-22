@@ -3,7 +3,7 @@ package com.zoho.dzide.zide
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
-import com.zoho.dzide.settings.ZideSettingsState
+import com.zoho.dzide.settings.CredentialResolver
 import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.util.ZeroProxyManager
 import java.io.File
@@ -255,21 +255,26 @@ object ZideConfigRepoService {
         return if (creds != null) embedCredentials(CLONE_URL, creds.first, creds.second) else CLONE_URL
     }
 
+    /** Zoho Repository (Settings) → credential URL → ~/.hgrc / ~/.netrc → Wget → Git. */
     internal fun fetchCloneCredentials(): Pair<String, String>? {
+        resolveSafely { CredentialResolver.resolveZohoRepoSettings() }?.let { return it.username to it.secret }
         fetchCredentialsFromUrl()?.let { return it }
-        val settings = try {
-            ZideSettingsState.getInstance()
-        } catch (_: Exception) {
-            null
+        val resolved = resolveSafely {
+            CredentialResolver.resolveZohoRepoGlobal(CLONE_URL)
+                ?: CredentialResolver.resolveWget(URI(CLONE_URL).host)
+                ?: CredentialResolver.resolveGit(CLONE_URL)
         } ?: return null
-        val wgetUser = settings.wgetUsername.trim()
-        val wgetPass = settings.getPassword(ZideSettingsState.KEY_WGET_PASSWORD)
-        if (wgetUser.isNotEmpty()) return wgetUser to wgetPass
-        val gitUser = settings.gitUsername.trim()
-        val gitPass = settings.getPassword(ZideSettingsState.KEY_GIT_PASSWORD)
-        if (gitUser.isNotEmpty()) return gitUser to gitPass
-        return null
+        log.info("ZIDE config repo clone credential source: ${resolved.source}")
+        return resolved.username to resolved.secret
     }
+
+    private fun resolveSafely(block: () -> CredentialResolver.ResolvedCredential?): CredentialResolver.ResolvedCredential? =
+        try {
+            block()
+        } catch (e: Exception) {
+            log.warn("Could not resolve ZIDE clone credentials: ${e.message}")
+            null
+        }
 
     private fun fetchCredentialsFromUrl(): Pair<String, String>? {
         return try {

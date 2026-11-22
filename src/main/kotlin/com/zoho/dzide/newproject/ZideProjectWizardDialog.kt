@@ -12,7 +12,7 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
-import com.zoho.dzide.settings.ZideSettingsState
+import com.zoho.dzide.settings.CredentialResolver
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.GridBagConstraints
@@ -301,7 +301,7 @@ class ZideProjectWizardDialog(
     }
 
     private fun loadProducts() {
-        val token = ZideSettingsState.getInstance().cmToolAuthToken
+        val token = CredentialResolver.resolveCmToolToken()?.secret.orEmpty()
         if (token.isBlank()) return
 
         val personalOnly = myServicesCheckBox.isSelected

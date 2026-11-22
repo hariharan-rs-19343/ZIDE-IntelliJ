@@ -1,7 +1,7 @@
 package com.zoho.dzide.cmtools
 
 import com.intellij.openapi.diagnostic.Logger
-import com.zoho.dzide.settings.ZideSettingsState
+import com.zoho.dzide.settings.CredentialResolver
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -28,7 +28,7 @@ class CmToolsRequest<T>(
     }
 
     fun send(): List<T> {
-        val token = ZideSettingsState.getInstance().cmToolAuthToken
+        val token = CredentialResolver.resolveCmToolToken()?.secret.orEmpty()
         if (token.isBlank()) {
             log.warn("[CMTools] No auth token configured")
             return emptyList()

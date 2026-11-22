@@ -10,13 +10,14 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.ToolWindowManager
+import com.zoho.dzide.settings.CredentialResolver
+import com.zoho.dzide.settings.WgetConfigurable
 import com.zoho.dzide.settings.ZideSettingsState
 import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.util.ConsoleUtil
 import com.zoho.dzide.util.NotificationUtil
 import com.zoho.dzide.util.ProcessUtil
 import com.zoho.dzide.util.ZeroProxyManager
-import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -45,11 +46,7 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
 
         settings.customBuildUrl = url.trim()
 
-        val wgetrcFile = File(System.getProperty("user.home"), ".wgetrc")
-        if (!wgetrcFile.exists()) {
-            NotificationUtil.error(project, "~/.wgetrc not found. Configure credentials in Settings > Tools > Zide > Wget Configuration.")
-            return
-        }
+        val wgetCred = CredentialResolver.requireWget(project) ?: return
 
         tomcatManager.ensureToolWindow {
             val console = tomcatManager.consoleView ?: return@ensureToolWindow
@@ -84,11 +81,14 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
                             trimmedUrl
                         )
 
+                        val (wgetEnv, cleanupWgetEnv) = CredentialResolver.wgetEnv(ZeroProxyManager.processEnv(), wgetCred)
+                        val wgetStderr = StringBuilder()
                         val handler = ProcessUtil.executeStreaming(
                             command = wgetCommand,
-                            env = ZeroProxyManager.processEnv(),
+                            env = wgetEnv,
                             onStdout = { },
                             onStderr = { text ->
+                                if (wgetStderr.length < 8_000) wgetStderr.append(text)
                                 parseWgetProgress(text)?.let { percent ->
                                     indicator.isIndeterminate = false
                                     indicator.fraction = percent / 100.0
@@ -97,7 +97,11 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
                             },
                             onExit = { }
                         )
-                        handler.waitFor()
+                        try {
+                            handler.waitFor()
+                        } finally {
+                            cleanupWgetEnv()
+                        }
 
                         if (indicator.isCanceled) {
                             handler.destroyProcess()
@@ -109,7 +113,15 @@ class CustomBuildAction : AnAction("Custom Build", "Deploy from a remote build U
                         val exitCode = handler.process.exitValue()
                         if (exitCode != 0) {
                             ConsoleUtil.print(console, project, "\n[Download] FAILED (exit code $exitCode)\n", ConsoleViewContentType.ERROR_OUTPUT)
-                            NotificationUtil.error(project, "Download failed. Check URL and ~/.wgetrc credentials.")
+                            if (CredentialResolver.looksLikeAuthFailure(wgetStderr.toString())) {
+                                NotificationUtil.error(
+                                    project,
+                                    CredentialResolver.authFailureMessage("Wget", wgetCred, "Wget Configuration"),
+                                    NotificationUtil.openSettingsAction(WgetConfigurable::class.java)
+                                )
+                            } else {
+                                NotificationUtil.error(project, "Download failed. Check URL and Wget credentials (${wgetCred.source}).")
+                            }
                             Files.deleteIfExists(tempFile)
                             return
                         }

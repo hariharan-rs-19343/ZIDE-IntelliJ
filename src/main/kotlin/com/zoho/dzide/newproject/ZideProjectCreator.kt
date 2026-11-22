@@ -17,6 +17,7 @@ import com.intellij.pom.java.LanguageLevel
 import com.zoho.dzide.debug.DebuggerAttachUtil
 import com.zoho.dzide.parser.PathResolver
 import com.zoho.dzide.parser.SourceFolderDetector
+import com.zoho.dzide.settings.CredentialResolver
 import com.zoho.dzide.settings.ZideSettingsState
 import com.zoho.dzide.tomcat.TomcatManager
 import com.zoho.dzide.util.ProcessUtil
@@ -396,12 +397,30 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             projectDir
         }
 
+        val settings = ZideSettingsState.getInstance()
+        val settingsGitUser = settings.gitUsername.trim()
+        val settingsGitPass = settings.getPassword(ZideSettingsState.KEY_GIT_PASSWORD)
+        val useSettingsCredential = settingsGitUser.isNotEmpty() && settingsGitPass.isNotEmpty()
+
+        val cloneCommand = mutableListOf(gitPath)
+        val cloneEnv = ZeroProxyManager.processEnv().toMutableMap()
+        cloneEnv["GIT_TERMINAL_PROMPT"] = "0"
+        if (useSettingsCredential) {
+            // Settings credential wins: clear inherited helpers (e.g. osxkeychain) for this command only.
+            // The inline helper answers "get" from env and ignores store/erase, so the system store is never touched.
+            cloneCommand += listOf(
+                "-c", "credential.helper=",
+                "-c", "credential.helper=!f() { cat >/dev/null; test \"\$1\" = get || exit 0; " +
+                    "echo \"username=\$DZIDE_GIT_USER\"; echo \"password=\$DZIDE_GIT_PASSWORD\"; }; f"
+            )
+            cloneEnv["DZIDE_GIT_USER"] = settingsGitUser
+            cloneEnv["DZIDE_GIT_PASSWORD"] = settingsGitPass
+        }
+        cloneCommand += listOf("clone", "--progress", "-b", branchArg, repositoryUrl, cloneDest.absolutePath)
+
         val cloneResult = ProcessUtil.executeStreamingAndWait(
-            command = listOf(
-                gitPath, "clone", "--progress", "-b", branchArg,
-                repositoryUrl, cloneDest.absolutePath
-            ),
-            env = ZeroProxyManager.processEnv(),
+            command = cloneCommand,
+            env = cloneEnv,
             timeoutMs = 600_000,
             shouldCancel = {
                 try {
@@ -424,10 +443,16 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             if (cloneDest != projectDir && cloneDest.exists()) {
                 cloneDest.deleteRecursively()
             }
-            throw RuntimeException(
-                "Git clone failed (exit code ${cloneResult.exitCode}): " +
-                    ZideConfigRepoService.redactUrlUserInfo(cloneResult.stderr.takeLast(500))
-            )
+            val detail = ZideConfigRepoService.redactUrlUserInfo(cloneResult.stderr.takeLast(500))
+            if (CredentialResolver.looksLikeAuthFailure(cloneResult.stderr)) {
+                val cred = if (useSettingsCredential) {
+                    CredentialResolver.ResolvedCredential(settingsGitUser, "", CredentialResolver.SOURCE_SETTINGS)
+                } else {
+                    CredentialResolver.resolveGitGlobal(repositoryUrl, gitPath)
+                }
+                throw RuntimeException(CredentialResolver.authFailureMessage("Git", cred, "Git") + "\n\n$detail")
+            }
+            throw RuntimeException("Git clone failed (exit code ${cloneResult.exitCode}): $detail")
         }
 
         if (cloneDest != projectDir) {
@@ -481,27 +506,43 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         indicator.text = "Downloading $fileName..."
         indicator.text2 = "Starting download..."
 
-        val wgetResult = ProcessUtil.executeStreamingAndWait(
-            command = listOf("wget", "--progress=dot:giga", "-O", tempFile.toString(), buildUrl),
-            env = ZeroProxyManager.processEnv(),
-            timeoutMs = 600_000,
-            shouldCancel = {
-                try {
-                    indicator.checkCanceled()
-                    false
-                } catch (_: ProcessCanceledException) {
-                    true
-                }
-            },
-            onStdout = { chunk -> updateIndicatorProgressLine(indicator, chunk) },
-            onStderr = { chunk -> updateIndicatorProgressLine(indicator, chunk) }
-        )
+        val wgetCred = CredentialResolver.resolveWget()
+        if (wgetCred == null) {
+            Files.deleteIfExists(tempFile)
+            throw RuntimeException(
+                "Wget credential not configured. Enter it in Settings > Tools > Zide > Wget Configuration, " +
+                    "or add user/password to ~/.wgetrc."
+            )
+        }
+        val (wgetEnv, cleanupWgetEnv) = CredentialResolver.wgetEnv(ZeroProxyManager.processEnv(), wgetCred)
+        val wgetResult = try {
+            ProcessUtil.executeStreamingAndWait(
+                command = listOf("wget", "--progress=dot:giga", "-O", tempFile.toString(), buildUrl),
+                env = wgetEnv,
+                timeoutMs = 600_000,
+                shouldCancel = {
+                    try {
+                        indicator.checkCanceled()
+                        false
+                    } catch (_: ProcessCanceledException) {
+                        true
+                    }
+                },
+                onStdout = { chunk -> updateIndicatorProgressLine(indicator, chunk) },
+                onStderr = { chunk -> updateIndicatorProgressLine(indicator, chunk) }
+            )
+        } finally {
+            cleanupWgetEnv()
+        }
         if (indicator.isCanceled) {
             Files.deleteIfExists(tempFile)
             throw ProcessCanceledException()
         }
         if (wgetResult.exitCode != 0) {
             Files.deleteIfExists(tempFile)
+            if (CredentialResolver.looksLikeAuthFailure(wgetResult.stderr)) {
+                throw RuntimeException(CredentialResolver.authFailureMessage("Wget", wgetCred, "Wget Configuration"))
+            }
             throw RuntimeException("Build download failed (exit code ${wgetResult.exitCode})")
         }
         indicator.text2 = "Download complete"
@@ -518,24 +559,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         indicator.text2 = ZideConfigRepoService.redactUrlUserInfo(line.replace('\r', ' ').take(180))
     }
 
-    private fun resolveGitExecutable(): String? {
-        val settings = ZideSettingsState.getInstance()
-        if (settings.gitPath.isNotBlank()) {
-            val gitExe = File(settings.gitPath, "git")
-            if (gitExe.exists()) return gitExe.absolutePath
-        }
-        val candidates = listOf("/usr/bin/git", "/usr/local/bin/git")
-        for (candidate in candidates) {
-            if (File(candidate).exists()) return candidate
-        }
-        try {
-            val process = ProcessBuilder("which", "git").start()
-            val result = process.inputStream.bufferedReader().readText().trim()
-            process.waitFor()
-            if (result.isNotEmpty() && File(result).exists()) return result
-        } catch (_: Exception) {}
-        return null
-    }
+    private fun resolveGitExecutable(): String? = CredentialResolver.findGitExecutable()
 
     private fun addGitIgnoreEntries(projectDir: File) {
         val gitignoreFile = File(projectDir, ".gitignore")
@@ -781,11 +805,18 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         val zipFile = File(antSetupDir, "hg_utils.zip")
 
         log.info("Downloading hg_utils from: $hgUtilsUrl")
-        val wgetResult = ProcessUtil.executeCapturing(
-            command = listOf("wget", "-q", "-O", zipFile.absolutePath, hgUtilsUrl),
-            env = ZeroProxyManager.processEnv(),
-            timeoutMs = 120_000
-        )
+        val wgetCred = CredentialResolver.resolveWget()
+        if (wgetCred == null) log.warn("No Wget credential in Settings, ~/.wgetrc or ~/.netrc; trying hg_utils download anyway")
+        val (wgetEnv, cleanupWgetEnv) = CredentialResolver.wgetEnv(ZeroProxyManager.processEnv(), wgetCred)
+        val wgetResult = try {
+            ProcessUtil.executeCapturing(
+                command = listOf("wget", "-q", "-O", zipFile.absolutePath, hgUtilsUrl),
+                env = wgetEnv,
+                timeoutMs = 120_000
+            )
+        } finally {
+            cleanupWgetEnv()
+        }
         if (wgetResult.exitCode != 0) {
             log.warn("Failed to download hg_utils.zip (exit code ${wgetResult.exitCode})")
             zipFile.delete()
@@ -1348,25 +1379,13 @@ $roots
     }
 
     companion object {
-        fun ensureCmToolToken(): Boolean {
-            val settings = ZideSettingsState.getInstance()
-            if (settings.cmToolAuthToken.isNotBlank()) return true
-
-            val token = Messages.showInputDialog(
-                "CMTool Auth Token is required to create a ZIDE project.\n\nEnter your CMTool Auth Token:",
-                "CMTool Auth Token Required",
-                null
-            )
-
-            if (token.isNullOrBlank()) {
-                Messages.showWarningDialog(
-                    "Cannot create ZIDE project without CMTool Auth Token.\nConfigure it in Settings > Tools > Zide > CMTool.",
-                    "CMTool Auth Token Required"
-                )
-                return false
-            }
-
-            settings.cmToolAuthToken = token.trim()
+        /**
+         * CMTool token and Wget credential are mandatory: Settings value, else global
+         * (~/.zide/zide.conf, ~/.wgetrc / ~/.netrc). Missing → error dialog with Open Settings.
+         */
+        fun ensureMandatoryCredentials(project: Project?): Boolean {
+            if (CredentialResolver.requireCmToolToken(project) == null) return false
+            if (CredentialResolver.requireWget(project) == null) return false
             return true
         }
     }

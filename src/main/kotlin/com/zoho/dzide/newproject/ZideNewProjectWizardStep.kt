@@ -16,7 +16,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.dsl.builder.*
-import com.zoho.dzide.settings.ZideSettingsState
+import com.zoho.dzide.settings.CredentialResolver
 import com.zoho.dzide.vcs.GitService
 import javax.swing.DefaultComboBoxModel
 import javax.swing.SwingUtilities
@@ -156,7 +156,7 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
         val projectName = baseData.name
         val projectPath = baseData.path
 
-        if (!ZideProjectCreator.ensureCmToolToken()) return
+        if (!ZideProjectCreator.ensureMandatoryCredentials(project)) return
 
         val cleanServiceName = serviceProperty.get().removePrefix("★ ").trim()
         val selectedProduct = products.find { it.name == cleanServiceName }
@@ -214,7 +214,7 @@ class ZideNewProjectWizardStep(parentStep: NewProjectWizardStep) : AbstractNewPr
     }
 
     private fun loadProducts() {
-        val token = ZideSettingsState.getInstance().cmToolAuthToken
+        val token = CredentialResolver.resolveCmToolToken()?.secret.orEmpty()
         if (token.isBlank()) {
             serviceModel.removeAllElements()
             serviceModel.addElement("CMTool token not configured")
