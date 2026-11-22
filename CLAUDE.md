@@ -130,7 +130,7 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 - Zide page: "Use custom protoc for ANT builds" (default off) + Protoc path (protoc executable or its bin folder; mandatory when enabled — Apply refused otherwise). Build and Build and Update Deployment pass `-Dprotobuf_local_dir=<dir> -Dprotobuf_dir=<dir>` (overrides build/ant.properties, never edits it) and prepend `<dir>` to PATH
 - Credential resolution (`settings/CredentialResolver`): Settings value wins; if blank, fall back to global — CMTool → `~/.zide/zide.conf` (`zide.cmtools.authtoken`); Wget → `~/.wgetrc` → `~/.netrc`; Git → `git credential fill` (osxkeychain etc.) → `~/.netrc`; Zoho Repo → `~/.hgrc [auth]` → `~/.netrc`
 - CMTool and Wget are mandatory: missing in both → action blocked with "Open Settings" dialog; startup balloon
-- Settings Git creds override the system helper per clone (`-c credential.helper=` + inline env helper); Settings Wget creds via temp `WGETRC`
+- Settings Git creds are embedded in the clone URL (`https://user:token@host/…`, URL-encoded) with helpers cleared for that command (`-c credential.helper=`); origin is reset to the clean URL after the clone. Blank → plain URL, git's own helper. Settings Wget creds via temp `WGETRC`
 - Plugin never writes to the system credential store (no `git credential approve/reject`, no keychain writes)
 
 ## Keyboard Shortcuts

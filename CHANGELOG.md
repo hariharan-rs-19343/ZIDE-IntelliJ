@@ -16,6 +16,11 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
   - Build and Build and Update Deployment pass `-Dprotobuf_local_dir` and `-Dprotobuf_dir` to ANT and put the folder first on `PATH`. `build/ant.properties` is not edited.
   - If the path becomes invalid, builds stop with an error linking to Settings.
 
+### Fixed
+- **Git clone with Settings credentials** — when Settings → Tools → Zide → Git has a username and password/token, New Project clones with them in the URL (`https://user:token@host/repo.git`, URL-encoded). When blank, git uses the system credential (osxkeychain) as before.
+  - Git's credential helpers are off for that clone, so the token is never saved to the keychain.
+  - After the clone, `origin` is reset to the plain URL, so the token is not left in `.git/config`. Progress and error messages never show it.
+
 ---
 
 ## [0.1.5] — 2026-11-22

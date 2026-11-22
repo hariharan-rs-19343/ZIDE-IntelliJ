@@ -405,18 +405,17 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
         val cloneCommand = mutableListOf(gitPath)
         val cloneEnv = ZeroProxyManager.processEnv().toMutableMap()
         cloneEnv["GIT_TERMINAL_PROMPT"] = "0"
-        if (useSettingsCredential) {
-            // Settings credential wins: clear inherited helpers (e.g. osxkeychain) for this command only.
-            // The inline helper answers "get" from env and ignores store/erase, so the system store is never touched.
-            cloneCommand += listOf(
-                "-c", "credential.helper=",
-                "-c", "credential.helper=!f() { cat >/dev/null; test \"\$1\" = get || exit 0; " +
-                    "echo \"username=\$DZIDE_GIT_USER\"; echo \"password=\$DZIDE_GIT_PASSWORD\"; }; f"
-            )
-            cloneEnv["DZIDE_GIT_USER"] = settingsGitUser
-            cloneEnv["DZIDE_GIT_PASSWORD"] = settingsGitPass
+        var cloneUrl = repositoryUrl
+        val embedSettingsCredential = useSettingsCredential &&
+            Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(repositoryUrl) &&
+            ZideConfigRepoService.stripUrlUserInfo(repositoryUrl) == repositoryUrl
+        if (embedSettingsCredential) {
+            // Settings credential wins: https://user:token@host/... (URL-encoded). Helpers are cleared for this
+            // command so git neither asks osxkeychain nor stores the URL credential in it afterwards.
+            cloneUrl = ZideConfigRepoService.embedCredentials(repositoryUrl, settingsGitUser, settingsGitPass)
+            cloneCommand += listOf("-c", "credential.helper=")
         }
-        cloneCommand += listOf("clone", "--progress", "-b", branchArg, repositoryUrl, cloneDest.absolutePath)
+        cloneCommand += listOf("clone", "--progress", "-b", branchArg, cloneUrl, cloneDest.absolutePath)
 
         val cloneResult = ProcessUtil.executeStreamingAndWait(
             command = cloneCommand,
@@ -445,7 +444,7 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             }
             val detail = ZideConfigRepoService.redactUrlUserInfo(cloneResult.stderr.takeLast(500))
             if (CredentialResolver.looksLikeAuthFailure(cloneResult.stderr)) {
-                val cred = if (useSettingsCredential) {
+                val cred = if (embedSettingsCredential) {
                     CredentialResolver.ResolvedCredential(settingsGitUser, "", CredentialResolver.SOURCE_SETTINGS)
                 } else {
                     CredentialResolver.resolveGitGlobal(repositoryUrl, gitPath)
@@ -453,6 +452,9 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
                 throw RuntimeException(CredentialResolver.authFailureMessage("Git", cred, "Git") + "\n\n$detail")
             }
             throw RuntimeException("Git clone failed (exit code ${cloneResult.exitCode}): $detail")
+        }
+        if (embedSettingsCredential) {
+            cleanOriginUrl(gitPath, cloneDest, repositoryUrl)
         }
 
         if (cloneDest != projectDir) {
@@ -466,6 +468,35 @@ class ZideProjectCreator(private val result: ZideProjectWizardDialog.WizardResul
             }
         }
         indicator.text2 = "Clone complete"
+    }
+
+    /** Resets origin to [repositoryUrl] so the Settings token embedded for the clone is not left in .git/config. */
+    private fun cleanOriginUrl(gitPath: String, repoDir: File, repositoryUrl: String) {
+        val result = try {
+            ProcessUtil.executeCapturing(
+                command = listOf(gitPath, "-C", repoDir.absolutePath, "remote", "set-url", "origin", repositoryUrl),
+                timeoutMs = 15_000
+            )
+        } catch (e: Exception) {
+            null
+        }
+        if (result?.exitCode == 0) return
+
+        log.warn("git remote set-url failed (exit ${result?.exitCode}); stripping credentials from .git/config directly")
+        val config = File(repoDir, ".git/config")
+        try {
+            if (config.isFile) {
+                val urlLine = Regex("""^(\s*url\s*=\s*)(\S+)(\s*)$""")
+                val cleaned = config.readLines().map { line ->
+                    urlLine.matchEntire(line)?.let { m ->
+                        m.groupValues[1] + ZideConfigRepoService.stripUrlUserInfo(m.groupValues[2]) + m.groupValues[3]
+                    } ?: line
+                }
+                config.writeText(cleaned.joinToString("\n", postfix = "\n"))
+            }
+        } catch (e: Exception) {
+            log.warn("Could not strip credentials from ${config.absolutePath}: ${e.message}")
+        }
     }
 
     /** Clears [target] children and moves [source] children into [target] (keeps [target] directory identity). */

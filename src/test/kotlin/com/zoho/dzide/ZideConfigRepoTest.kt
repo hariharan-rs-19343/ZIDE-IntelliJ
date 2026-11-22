@@ -100,6 +100,25 @@ class ZideConfigRepoServiceTest {
         assertEquals("", ZideConfigRepoService.redactUrlUserInfo(null))
         assertEquals("", ZideConfigRepoService.redactUrlUserInfo(""))
     }
+
+    @Test
+    fun `embedCredentials url-encodes special characters in token`() {
+        assertEquals(
+            "https://u:p%40ss%3A%2F%23@github.com/u/r.git",
+            ZideConfigRepoService.embedCredentials("https://github.com/u/r.git", "u", "p@ss:/#")
+        )
+    }
+
+    @Test
+    fun `embedded git credential is redacted and stripped`() {
+        val authUrl = ZideConfigRepoService.embedCredentials("https://github.com/u/r.git", "u", "p@ss:/#")
+        val redacted = ZideConfigRepoService.redactUrlUserInfo("fatal: Authentication failed for '$authUrl'")
+        assertFalse(redacted.contains("p%40ss"))
+        assertEquals("fatal: Authentication failed for 'https://github.com/u/r.git'", redacted)
+        assertEquals("https://github.com/u/r.git", ZideConfigRepoService.stripUrlUserInfo(authUrl))
+        assertEquals("https://github.com/u/r.git", ZideConfigRepoService.stripUrlUserInfo("https://github.com/u/r.git"))
+    }
+
 }
 
 class ConfigReplacerRunnerTest {
