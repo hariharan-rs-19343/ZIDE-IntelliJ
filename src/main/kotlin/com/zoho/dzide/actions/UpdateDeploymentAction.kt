@@ -60,22 +60,27 @@ class UpdateDeploymentAction : AnAction("Local Build", "Deploy a local zip file 
     companion object {
 
         fun runDeploymentWithoutServer(project: Project, tomcatManager: TomcatManager, zipPath: Path) {
+            val tempServer = resolveProjectServer(project) ?: return
+            runDeployment(project, tempServer, tomcatManager, zipPath)
+        }
+
+        /** Temporary server from .zide_resources/service.xml when no Tomcat server is registered. */
+        fun resolveProjectServer(project: Project): TomcatServer? {
             val projectPath = project.basePath
             val zideConfig = projectPath?.let { ZideConfigParser.readZideConfig(it) }
             val deploymentFolder = zideConfig?.service?.properties?.get("ZIDE.DEPLOYMENT_FOLDER")
             if (deploymentFolder.isNullOrBlank()) {
                 NotificationUtil.error(project, "ZIDE.DEPLOYMENT_FOLDER not found in .zide_resources/service.xml. Add a Tomcat server first.")
-                return
+                return null
             }
             val parentService = zideConfig.service?.properties?.get("ZIDE.PARENT_SERVICE") ?: ""
             val tomcatPath = "$deploymentFolder/AdventNet/Sas/tomcat"
 
-            val tempServer = TomcatServer(
+            return TomcatServer(
                 name = parentService.ifBlank { "ZIDE" },
                 path = tomcatPath,
                 zideRuntimeProperties = zideConfig.service?.properties
             )
-            runDeployment(project, tempServer, tomcatManager, zipPath)
         }
 
         fun runDeployment(project: Project, server: TomcatServer, tomcatManager: TomcatManager, zipPath: Path) {

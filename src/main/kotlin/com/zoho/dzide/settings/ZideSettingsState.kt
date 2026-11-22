@@ -29,7 +29,11 @@ class ZideSettingsState : PersistentStateComponent<ZideSettingsState.State> {
         /** True while the IntelliJ proxy points at the Zero Agent because of this plugin. */
         var zeroProxyApplied: Boolean = false,
         /** IntelliJ proxy before the Zero Agent proxy was applied ([com.zoho.dzide.util.SavedIdeProxy.encode]). */
-        var savedIdeProxy: String = ""
+        var savedIdeProxy: String = "",
+        /** When true, [protocPath] is passed to ANT builds (protobuf_local_dir / protobuf_dir + PATH). */
+        var protocEnabled: Boolean = false,
+        /** protoc executable or the folder containing it. */
+        var protocPath: String = ""
     )
 
     private var myState = State()
@@ -79,6 +83,14 @@ class ZideSettingsState : PersistentStateComponent<ZideSettingsState.State> {
     var savedIdeProxy: String
         get() = myState.savedIdeProxy
         set(value) { myState.savedIdeProxy = value }
+
+    var protocEnabled: Boolean
+        get() = myState.protocEnabled
+        set(value) { myState.protocEnabled = value }
+
+    var protocPath: String
+        get() = myState.protocPath
+        set(value) { myState.protocPath = value }
 
     fun getPassword(key: String): String {
         val attributes = credentialAttributes(key)

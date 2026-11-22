@@ -28,9 +28,9 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 ## Package Structure (`src/main/kotlin/com/zoho/dzide/`)
 
 - `DzidePlugin.kt` — ProjectActivity startup (logs init, checks ~/.wgetrc, auto-update check)
-- `actions/` — AnAction classes (Start, Stop, Debug, Build, UpdateDeployment, AppLogs, ClearAppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh, RunHooks, CustomBuild, Uninstall)
+- `actions/` — AnAction classes (Start, Stop, Debug, Build, BuildAndUpdateDeployment, UpdateDeployment, AppLogs, ClearAppLogs, DeploymentProperties, Add/Edit/Remove Server, Restart, Refresh, RunHooks, CustomBuild, Uninstall)
 - `tomcat/` — TomcatManager (lifecycle, compiler output config, build-before-start, project libraries), TomcatServerProvider (CRUD)
-- `deploysync/` — DeploySyncFileCreationListener (BulkFileListener for create/move/save/delete), ResourceSyncManager (ANT hooks, hot-swap trigger, auto-resource copy, file delete sync), AntResolver
+- `deploysync/` — DeploySyncFileCreationListener (BulkFileListener for create/move/save/delete), ResourceSyncManager (ANT hooks, hot-swap trigger, auto-resource copy, file delete sync), AntResolver, BuildOutputLocator (finds the ANT build output zip)
 - `zide/` — ZideConfigParser, DeploymentConfigPatcher (server.xml, web.xml, persistence, security, HTTP port — no keystore/HTTPS connector), ZideSetupWizard, DeploymentPropertiesDialog
 - `config/replacer/` — data-driven install.xml / install.properties Replacer at launch (Eclipse parity)
 - `newproject/` — ZideProjectCreator, wizard dialogs/steps, CmToolApiClient
@@ -40,7 +40,7 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 - `persistence/` — TomcatServerState (dzide/tomcat-servers.xml), ZideCacheState (dzide/eclipse-zide.xml)
 - `runconfig/` — TomcatConfigurationType, TomcatRunConfiguration, TomcatRunState, Editor, Options, Factory
 - `toolwindow/` — TomcatToolWindowFactory, TomcatToolbar, TomcatTreeModel, TomcatTreeCellRenderer, TomcatTreePopupHandler
-- `util/` — ProcessUtil, ShellUtil, PortUtil, NotificationUtil, ConsoleUtil, ZeroProxy (Zero Agent detection, launch.proxy.vmargs), ZeroProxyManager (IDE proxy apply/restore, child-process proxy env)
+- `util/` — ProcessUtil, ShellUtil, PortUtil, NotificationUtil, ConsoleUtil, ZeroProxy (Zero Agent detection, launch.proxy.vmargs), ZeroProxyManager (IDE proxy apply/restore, child-process proxy env), ProtocConfig (custom protoc for ANT builds)
 - `settings/` — ZideSettingsState, ZideSettingsConfigurable, CmToolConfigurable, WgetConfigurable, GitConfigurable, ZohoRepoConfigurable, PasswordFieldWithToggle
 - `update/` — PluginUpdateChecker (GitHub releases auto-update)
 
@@ -86,6 +86,14 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 8. Run ANT hooks (precreationhook, postservicetarget, zidemodulehook)
 9. Reset ZIDE.DO_REPLACE=false; apply install.xml Replacer or hardcoded DeploymentConfigPatcher; set DO_REPLACE=true
 
+## Build and Update Deployment Flow (Ctrl+Shift+Alt+B)
+
+1. Pre-checks on EDT: `{project}/build/` exists, ANT resolved, protoc valid (if enabled), Wget credential (mandatory), target server picked
+2. `ant` in `{project}/build/` (default target) streamed into SAS-ZIDE Output (not Terminal — exit code needed); cancellable, 60 min timeout
+3. Non-zero exit → stop, no deploy
+4. Output zip (must be newer than build start): `build/ant.properties` `${output_dir}/${product_name}.zip` → newest zip in `output_dir` → service.xml `ZIDE.DOWNLOAD_URL` (local path only) → saved pick (`PropertiesComponent` key `dzide.buildAndUpdate.outputZip`) → file chooser (pick is saved)
+5. `UpdateDeploymentAction.runDeploymentCore` (same steps as Update Deployment Flow)
+
 ## ANT Script Detection
 
 **Update Deployment:**
@@ -119,6 +127,7 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 - Zoho Repository: Username + Password (PasswordSafe)
 - Application-level persistence in `dzide-settings.xml`
 - Passwords encrypted via IntelliJ PasswordSafe
+- Zide page: "Use custom protoc for ANT builds" (default off) + Protoc path (protoc executable or its bin folder; mandatory when enabled — Apply refused otherwise). Build and Build and Update Deployment pass `-Dprotobuf_local_dir=<dir> -Dprotobuf_dir=<dir>` (overrides build/ant.properties, never edits it) and prepend `<dir>` to PATH
 - Credential resolution (`settings/CredentialResolver`): Settings value wins; if blank, fall back to global — CMTool → `~/.zide/zide.conf` (`zide.cmtools.authtoken`); Wget → `~/.wgetrc` → `~/.netrc`; Git → `git credential fill` (osxkeychain etc.) → `~/.netrc`; Zoho Repo → `~/.hgrc [auth]` → `~/.netrc`
 - CMTool and Wget are mandatory: missing in both → action blocked with "Open Settings" dialog; startup balloon
 - Settings Git creds override the system helper per clone (`-c credential.helper=` + inline env helper); Settings Wget creds via temp `WGETRC`
@@ -130,6 +139,7 @@ This compiles, tests, and produces the distributable zip. If the build fails, fi
 - Debug: Ctrl+Shift+D
 - Stop: Ctrl+Shift+.
 - Build: Ctrl+Shift+B
+- Build and Update Deployment: Ctrl+Shift+Alt+B
 - Update Deployment: Ctrl+Shift+U
 - App Logs: Ctrl+Shift+L
 - Clear App Logs: Option+Shift+K (Alt+Shift+K)

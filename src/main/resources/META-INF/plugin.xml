@@ -347,6 +347,14 @@
                 <keyboard-shortcut keymap="$default" first-keystroke="control shift B"/>
             </action>
 
+            <action id="dzide.BuildAndUpdateDeployment"
+                    class="com.zoho.dzide.actions.BuildAndUpdateDeploymentAction"
+                    text="Build and Update Deployment"
+                    description="Run ANT build, then deploy the produced zip"
+                    icon="AllIcons.Actions.Execute">
+                <keyboard-shortcut keymap="$default" first-keystroke="control shift alt B"/>
+            </action>
+
             <group id="dzide.RunHooksGroup"
                    text="Run Hooks"
                    description="Run ZIDE ANT hooks"
