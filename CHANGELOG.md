@@ -17,9 +17,8 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
   - If the path becomes invalid, builds stop with an error linking to Settings.
 
 ### Fixed
-- **Git clone with Settings credentials** — when Settings → Tools → Zide → Git has a username and password/token, New Project clones with them in the URL (`https://user:token@host/repo.git`, URL-encoded). When blank, git uses the system credential (osxkeychain) as before.
-  - Git's credential helpers are off for that clone, so the token is never saved to the keychain.
-  - After the clone, `origin` is reset to the plain URL, so the token is not left in `.git/config`. Progress and error messages never show it.
+- **Git clone uses the system credential only** — New Project clone and the wizard's branch listing no longer send the Settings → Tools → Zide → Git username/password, which Zoho repositories don't accept. Git's own credential helper (e.g. osxkeychain) or `~/.netrc` is used, as before 0.1.5.
+  - A missing credential fails right away instead of waiting for a prompt, and the error points to Keychain Access / `~/.netrc`.
 
 ---
 

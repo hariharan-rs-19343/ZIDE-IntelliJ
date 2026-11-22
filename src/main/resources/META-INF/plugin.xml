@@ -58,7 +58,7 @@
             <li>Build and Update Deployment (Ctrl+Shift+Alt+B): runs the ANT build, then deploys the produced zip; nothing is deployed if the build fails</li>
             <li>Build output zip found from build/ant.properties or service.xml ZIDE.DOWNLOAD_URL; otherwise a file chooser, remembered for future builds</li>
             <li>Settings → Tools → Zide → "Use custom protoc for ANT builds": required protoc path passed as protobuf_local_dir / protobuf_dir and added to PATH</li>
-            <li>Fix: git clone uses the Settings Git username/token in the URL (https://user:token@host/…); falls back to the system credential when blank. The token is not saved to the keychain or left in .git/config</li>
+            <li>Fix: New Project git clone and branch listing use only the system git credential (credential helper / ~/.netrc); the Settings Git username/password is no longer sent</li>
         </ul>
         <b>0.1.5</b>
         <ul>

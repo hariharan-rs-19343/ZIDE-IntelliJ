@@ -100,16 +100,11 @@ class GitConfigurable : Configurable {
         updateHintLabel()
     }
 
-    /** Git's helper is queried per host at clone time, so no lookup here (read-only, never prompts). */
+    /** Clone and branch listing never send these fields; they always use the system git credential. */
     private fun updateHintLabel() {
-        val filled = !usernameField?.text.isNullOrBlank() && !passwordField?.text.isNullOrEmpty()
-        GlobalCredentialHint.update(
-            hintLabel,
-            fieldsFilled = filled,
-            globalSource = null,
-            lookedIn = "git's credential helper (e.g. osxkeychain) or ${CredentialResolver.SOURCE_NETRC}",
-            mandatory = false
-        )
+        hintLabel?.foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
+        hintLabel?.text = "New Project clone and branch listing use git's credential helper " +
+            "(e.g. osxkeychain) or ${CredentialResolver.SOURCE_NETRC}, not these fields."
     }
 
     override fun disposeUIResources() {

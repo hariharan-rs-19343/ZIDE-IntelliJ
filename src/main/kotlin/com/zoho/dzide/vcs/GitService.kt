@@ -38,7 +38,8 @@ object GitService {
             .setRemote(repoUrl)
             .setHeads(true)
 
-        CredentialResolver.resolveGit(repoUrl)?.let {
+        // System credential only (git's helper / ~/.netrc), same as the New Project clone.
+        CredentialResolver.resolveGitGlobal(repoUrl)?.let {
             cmd.setCredentialsProvider(UsernamePasswordCredentialsProvider(it.username, it.secret))
         }
 
