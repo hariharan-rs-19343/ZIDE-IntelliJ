@@ -4,6 +4,24 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 
 ---
 
+## [0.1.5] — 2026-11-22
+
+### Added
+- **Global credential fallback** — values in Settings → Tools → Zide always win. When a field is blank, the plugin uses the credential already on the machine:
+  - CMTool → `~/.zide/zide.conf` (`zide.cmtools.authtoken`, shared with Eclipse ZIDE)
+  - Wget → `~/.wgetrc`, then `~/.netrc`
+  - Git → git's credential helper (e.g. osxkeychain), then `~/.netrc`
+  - Zoho Repository → `~/.hgrc` `[auth]`, then `~/.netrc`
+- **Credential source hint** — each credential page in Settings shows which source will be used. CMTool and Wget show red when nothing is found.
+
+### Changed
+- **CMTool and Wget are required** — New Project and Custom Build stop with an error dialog and an **Open Settings** button when neither Settings nor the global file has them. Startup shows a warning with the same link. The old CMTool token input box is gone.
+- **Settings credentials override stale global ones** — a Git username/password in Settings is used for the clone instead of the keychain. Wget credentials in Settings are used even if `~/.wgetrc` has older values. The plugin only reads the system credential store and never writes to it.
+- **Zoho Repository credential is now used** — it is tried first when downloading the ZIDE config repository.
+- **Clearer login errors** — failed git clones and wget downloads say which credential was rejected (Settings, keychain, `~/.wgetrc`, …).
+
+---
+
 ## [0.1.4] — 2026-11-20
 
 ### Fixed

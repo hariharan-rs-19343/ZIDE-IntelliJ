@@ -53,6 +53,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.1.5</b>
+        <ul>
+            <li>Credentials in Settings → Tools → Zide win; blank fields fall back to global credentials (CMTool: ~/.zide/zide.conf, Wget: ~/.wgetrc / ~/.netrc, Git: credential helper / ~/.netrc, Zoho Repository: ~/.hgrc / ~/.netrc)</li>
+            <li>CMTool and Wget are required: New Project and Custom Build stop with an Open Settings dialog when neither source has them</li>
+            <li>Settings Git and Wget credentials override older keychain / ~/.wgetrc values; the system credential store is never modified</li>
+            <li>Settings pages show which credential source will be used; login errors name the rejected source</li>
+        </ul>
         <b>0.1.4</b>
         <ul>
             <li>install.xml XML rules match Eclipse ZIDE: regex rules apply to the element's attributes, and newAttribute rules add an attribute instead of wiping the element's children</li>
