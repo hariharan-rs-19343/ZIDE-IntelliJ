@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <plugins>
     <plugin id="com.zoho.intellij.zide"
-            url="https://github.com/hariharan-rs-19343/ZIDE-IntelliJ/releases/download/V0.1.5/zide-intelliJ-plugin-0.1.5.zip"
-            version="0.1.5">
+            url="https://github.com/hariharan-rs-19343/ZIDE-IntelliJ/releases/download/V0.1.6/zide-intelliJ-plugin-0.1.6.zip"
+            version="0.1.6">
         <name>ZIDE</name>
         <vendor>Zoho Corporation</vendor>
         <description><![CDATA[

@@ -4,6 +4,20 @@ All notable changes to the ZIDE IntelliJ plugin are documented here.
 
 ---
 
+## [0.1.6] — 2026-11-22
+
+### Added
+- **Build and Update Deployment** (ZIDE menu after Build, Ctrl+Shift+Alt+B) — runs the ANT build in `build/` and deploys the zip it produces in one step.
+  - Build output streams into the SAS-ZIDE **Output** tab. The build can be cancelled, and nothing is deployed if it fails or is cancelled.
+  - The zip is found automatically: `${output_dir}/${product_name}.zip` from `build/ant.properties`, the newest zip in `output_dir`, or `ZIDE.DOWNLOAD_URL` in `service.xml` when it is a local path. Only zips created after the build started are used, so an old build is never deployed.
+  - If the zip can't be found, a file chooser opens in the output folder. The pick is remembered for future builds of that project.
+  - The server is chosen before the build starts, and deployment then follows the same steps as Update Deployment → Local Build.
+- **Custom protoc for ANT builds** — Settings → Tools → Zide → "Use custom protoc for ANT builds" (default off). When on, a protoc path is required: the `protoc` file or its `bin` folder.
+  - Build and Build and Update Deployment pass `-Dprotobuf_local_dir` and `-Dprotobuf_dir` to ANT and put the folder first on `PATH`. `build/ant.properties` is not edited.
+  - If the path becomes invalid, builds stop with an error linking to Settings.
+
+---
+
 ## [0.1.5] — 2026-11-22
 
 ### Added

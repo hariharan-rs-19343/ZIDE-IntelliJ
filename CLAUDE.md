@@ -3,7 +3,7 @@
 ## Project Identity
 
 - Plugin ID: `com.zoho.dzide`
-- Current Version: 0.1.5
+- Current Version: 0.1.6
 - Language: Kotlin 2.2.0, JVM 21
 - Build: Gradle 9.0 (Kotlin DSL), IntelliJ Platform Plugin 2.16.0
 - Target IDE: IntelliJ IDEA 2024.3+ (Community or Ultimate)
