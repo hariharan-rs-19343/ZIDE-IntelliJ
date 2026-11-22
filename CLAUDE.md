@@ -11,6 +11,10 @@
 - Output zip: `build/distributions/zide-intelliJ-plugin-{version}.zip`
 - Version defined in: `gradle.properties` (`pluginVersion`)
 
+## Git Branch Rule
+
+Do **not** create a new branch for this repo. When the user asks to commit, commit directly to `main`.
+
 ## Auto-Build Rule
 
 After fixing a bug or implementing a feature, always run the Gradle build as the final step before reporting completion:
